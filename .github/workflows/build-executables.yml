@@ -1,0 +1,219 @@
+name: Build Cross-Platform Executables
+
+on:
+  # Trigger on version tags
+  push:
+    tags:
+      - 'v*'
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+# Permissions needed for creating releases
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller==6.9.0
+
+    - name: Build Windows executable
+      run: |
+        python build_standalone.py
+
+    - name: Verify build
+      run: |
+        if (Test-Path "dist/GeneaHTR.exe") {
+          Write-Host "[SUCCESS] Windows executable created successfully"
+          $size = (Get-Item "dist/GeneaHTR.exe").Length / 1MB
+          Write-Host "[INFO] Size: $([math]::Round($size, 1)) MB"
+        } else {
+          Write-Host "[ERROR] Windows executable not found"
+          exit 1
+        }
+
+    - name: Upload Windows executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: GeneaHTR-Windows-${{ github.event.inputs.version || github.ref_name }}
+        path: dist/GeneaHTR.exe
+        retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller==6.9.0
+
+    - name: Build macOS app bundle
+      run: |
+        python build_standalone.py
+
+    - name: Verify build
+      run: |
+        if [ -d "dist/GeneaHTR.app" ]; then
+          echo "[SUCCESS] macOS app bundle created successfully"
+          size=$(du -sm "dist/GeneaHTR.app" | cut -f1)
+          echo "[INFO] Size: ${size} MB"
+        else
+          echo "[ERROR] macOS app bundle not found"
+          exit 1
+        fi
+
+    - name: Create macOS archive
+      run: |
+        cd dist
+        zip -r GeneaHTR-macOS.zip GeneaHTR.app
+
+    - name: Upload macOS app bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: GeneaHTR-macOS-${{ github.event.inputs.version || github.ref_name }}
+        path: dist/GeneaHTR-macOS.zip
+        retention-days: 30
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-dev
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller==6.9.0
+
+    - name: Build Linux executable
+      run: |
+        python build_standalone.py
+
+    - name: Verify build
+      run: |
+        if [ -f "dist/GeneaHTR" ]; then
+          echo "[SUCCESS] Linux executable created successfully"
+          size=$(du -sm "dist/GeneaHTR" | cut -f1)
+          echo "[INFO] Size: ${size} MB"
+          # Make executable
+          chmod +x "dist/GeneaHTR"
+        else
+          echo "[ERROR] Linux executable not found"
+          exit 1
+        fi
+
+    - name: Upload Linux executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: GeneaHTR-Linux-${{ github.event.inputs.version || github.ref_name }}
+        path: dist/GeneaHTR
+        retention-days: 30
+
+  create-release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display artifact structure
+      run: |
+        echo "[INFO] Downloaded artifacts:"
+        find artifacts -type f -exec ls -lh {} \;
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.version || github.ref_name }}
+        name: Genea HTR Tool ${{ github.event.inputs.version || github.ref_name }}
+        make_latest: true
+        body: |
+          ## Genealogy Assistant AI Handwritten Text Recognition Tool - Cross-Platform Release
+          
+          ### Downloads
+          - **Windows**: `GeneaHTR.exe` - Windows 10/11 executable
+          - **macOS**: `GeneaHTR-macOS.zip` - Contains `GeneaHTR.app` bundle
+          - **Linux**: `GeneaHTR` - Linux executable
+          
+          ### Installation
+          
+          **Windows:**
+          1. Download `GeneaHTR.exe`
+          2. Run directly (may show security warning - click "More info" → "Run anyway")
+          
+          **macOS:**
+          1. Download and extract `GeneaHTR-macOS.zip`
+          2. Drag `GeneaHTR.app` to Applications folder
+          3. Right-click → Open (authorize the application via the Security & Privacy settings in System Preferences)
+          
+          **Linux:**
+          1. Download `GeneaHTR`
+          2. Make executable: `chmod +x GeneaHTR`
+          3. Run: `./GeneaHTR`
+          
+          ### Requirements
+          - OpenAI API key required for transcription functionality
+          - Your OpenAI account must be verified to use the o4-mini model
+          - No Python installation needed
+          
+          ### Features
+          - Drag & drop image file processing
+          - Handwriting transcription using OpenAI API
+          - Searchable PDF file generation with source image
+          - Configurable prompt, model and API settings
+          - Multi-threaded processing support
+        files: |
+          artifacts/GeneaHTR-Windows-*/GeneaHTR.exe
+          artifacts/GeneaHTR-macOS-*/GeneaHTR-macOS.zip
+          artifacts/GeneaHTR-Linux-*/GeneaHTR
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
