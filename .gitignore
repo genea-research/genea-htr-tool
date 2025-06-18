@@ -1,0 +1,48 @@
+# Build artifacts - DO NOT commit these
+build/
+dist/
+docs/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.DS_Store
+
+# PyInstaller specific
+*.manifest
+*.spec.bak
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Logs
+*.log
+
+# Virtual environments
+venv/
+env/
+.env
+
+# API keys and secrets (if you have any config files with keys)
+config.ini
+secrets.json
+.env.local
+htr_settings.json
+
+# Icons - commit these for distribution
+# icons/ folder should be committed with your icon files
