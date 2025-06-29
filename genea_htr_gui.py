@@ -17,8 +17,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 """
-Handwriting transcription script using OpenAI API
-Processes JPEG files, transcribes handwriting, and creates searchable PDFs.
+Handwriting transcription script using multiple AI APIs
+Processes JPEG, PNG, and PDF files, transcribes handwriting, and creates searchable PDFs.
 """
 
 import tkinter as tk
@@ -43,13 +43,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from genea_htr import HandwritingOCR
 
 # Application version
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 
 
 class BaseDialog(tk.Toplevel):
     """Base class for dialog windows."""
     def __init__(self, parent, title, min_width=600, min_height=400, resizable=(True, True)):
         super().__init__(parent)
+        self.parent = parent  # Store parent reference
         self.title(title)
         self.transient(parent)
         self.grab_set()
@@ -270,39 +271,19 @@ def get_settings_path():
 class SettingsDialog(BaseDialog):
     """Dialog for editing settings."""
     
-    def __init__(self, parent, config: Dict, general_settings: Dict = None):
-        super().__init__(parent, "Edit Settings", min_width=800, min_height=600)
+    def __init__(self, parent, provider_configs: Dict, general_settings: Dict = None):
+        super().__init__(parent, "Edit Settings", min_width=900, min_height=700)
 
-        self.config = config.copy()  # Work with a copy
+        self.provider_configs = provider_configs.copy()  # Work with a copy
         self.general_settings = general_settings.copy() if general_settings else {"max_workers": 1}
 
         self.create_widgets()
 
         # Force initial update of all tabs after a short delay
         self.after(100, self.force_initial_update)
+        # Additional delay to ensure canvas layout is complete
+        self.after(200, self.force_canvas_layout)
 
-    def get_theme_background_color(self, widget):
-        """Get the appropriate background color for the current theme."""
-        try:
-            # Try to get background from the widget
-            return widget.cget('bg')
-        except:
-            try:
-                # Try to get from the dialog
-                return self.cget('bg')
-            except:
-                try:
-                    # Try to get from a ttk frame
-                    temp_frame = ttk.Frame(widget)
-                    style = ttk.Style()
-                    # Get the background color from the current theme
-                    bg = style.lookup('TFrame', 'background')
-                    temp_frame.destroy()
-                    return bg if bg else 'SystemButtonFace'
-                except:
-                    # Final fallback
-                    return 'SystemButtonFace'
-        
     def create_widgets(self):
         """Create the settings interface."""
         # Main frame with scrollbar
@@ -313,15 +294,12 @@ class SettingsDialog(BaseDialog):
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Primary settings tab
-        primary_frame = ttk.Frame(notebook)
-        notebook.add(primary_frame, text="Primary Model")
-        self.create_model_settings(primary_frame, "primary")
-        
-        # Fallback settings tab
-        fallback_frame = ttk.Frame(notebook)
-        notebook.add(fallback_frame, text="Fallback Model")
-        self.create_model_settings(fallback_frame, "fallback")
+        # Provider tabs
+        provider_display_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
+        for provider in ["openai", "anthropic", "openrouter", "google"]:
+            provider_frame = ttk.Frame(notebook)
+            notebook.add(provider_frame, text=provider_display_names[provider])
+            self.create_provider_settings(provider_frame, provider)
         
         # General settings tab
         general_frame = ttk.Frame(notebook)
@@ -331,6 +309,12 @@ class SettingsDialog(BaseDialog):
         # Bind tab change event to refresh canvas
         notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         self.notebook = notebook
+        
+        # Also bind to selection events for immediate response
+        def on_tab_select(event):
+            # Force immediate update when tab is selected
+            self.after_idle(lambda: self.on_tab_changed(event))
+        notebook.bind("<Button-1>", on_tab_select)
         
         # Force initial update of all tabs after a short delay
         self.after(100, self.force_initial_update)
@@ -343,31 +327,138 @@ class SettingsDialog(BaseDialog):
         ttk.Button(button_frame, text="Cancel", command=self.cancel, style='Rounded.TButton').pack(side=tk.RIGHT)
         ttk.Button(button_frame, text="Reset to Defaults", command=self.reset_defaults, style='Rounded.TButton').pack(side=tk.LEFT)
         
-    def create_model_settings(self, parent, config_key):
-        """Create settings widgets for a model configuration."""
-        config = self.config[config_key]
+    def create_provider_settings(self, parent, provider):
+        """Create settings widgets for a provider."""
+        # Create scrollable frame
+        canvas = tk.Canvas(parent, bg="#2b2b2b", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
         
-        # Create a simple scrollable frame without canvas complications
-        # Use a Frame with scrollbar instead of Canvas for better reliability
-        container_frame = ttk.Frame(parent)
-        container_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create canvas window and store reference
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         
-        # Create main content frame
-        content_frame = ttk.Frame(container_frame)
-        content_frame.pack(fill=tk.BOTH, expand=True)
+        def configure_scroll_region(event=None):
+            """Update scroll region when scrollable frame changes."""
+            canvas.configure(scrollregion=canvas.bbox("all"))
         
-        # Model settings
+        def configure_canvas_width(event=None):
+            """Update scrollable frame width to match canvas width."""
+            canvas_width = canvas.winfo_width()
+            if canvas_width > 1:  # Only update if canvas has valid width
+                canvas.itemconfig(canvas_window, width=canvas_width)
+                # Force immediate redraw
+                canvas.update_idletasks()
+                scrollable_frame.update_idletasks()
+        
+        # Bind events for proper scrolling and width management
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        canvas.bind("<Configure>", configure_canvas_width)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel to canvas
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind("<MouseWheel>", on_mousewheel)
+        
+        # Add visibility event handlers to ensure content is displayed
+        def on_canvas_map(event):
+            """Handle canvas being mapped (becoming visible)."""
+            canvas.update_idletasks()
+            scrollable_frame.update_idletasks()
+            canvas.event_generate('<Configure>')
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        def on_canvas_visibility(event):
+            """Handle canvas visibility changes."""
+            if event.state == "VisibilityUnobscured":
+                canvas.update_idletasks()
+                canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        canvas.bind("<Map>", on_canvas_map)
+        canvas.bind("<Visibility>", on_canvas_visibility)
+        
+        # Get provider config
+        config = self.provider_configs.get(provider, {
+            "api_key": "",
+            "primary": {"model": "", "prompt": ""},
+            "fallback": {"model": "", "prompt": ""}
+        })
+        
+        # API Key section
+        api_frame = tk.Frame(scrollable_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
+        api_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        # Proper display names for section titles
+        provider_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter"}
+        display_name = provider_names.get(provider, provider.title())
+        api_label = tk.Label(api_frame, text=f"{display_name} API Configuration", 
+                           bg="#212121", fg="#ffffff", font=("Arial", 14, "bold"))
+        api_label.pack(anchor="nw", padx=10, pady=(5, 0))
+        
+        api_inner = tk.Frame(api_frame, bg="#212121")
+        api_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        tk.Label(api_inner, text="API Key:", bg="#212121", fg="#ffffff", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        api_key_var = tk.StringVar(value=config.get("api_key", ""))
+        api_key_entry = ttk.Entry(api_inner, textvariable=api_key_var, show="*", width=50, style='Borderless.TEntry')
+        api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        setattr(self, f"{provider}_api_key_var", api_key_var)
+        
+        # Primary model section
+        self.create_model_section(scrollable_frame, provider, "primary", config.get("primary", {}))
+        
+        # Fallback model section
+        self.create_model_section(scrollable_frame, provider, "fallback", config.get("fallback", {}))
+        
+        # Store references
+        setattr(self, f"{provider}_canvas", canvas)
+        setattr(self, f"{provider}_scrollable_frame", scrollable_frame)
+        
+        # Schedule initial width configuration after widget is mapped
+        def initial_config():
+            canvas.update_idletasks()
+            scrollable_frame.update_idletasks()
+            canvas.event_generate('<Configure>')
+            # Force canvas to be visible
+            canvas.focus_set()
+            canvas.event_generate('<Enter>')
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        # Multiple attempts to ensure display
+        self.after(1, initial_config)   # Very immediate
+        self.after(25, initial_config)
+        self.after(50, initial_config)
+        self.after(100, initial_config)
+        self.after(200, initial_config) # Later fallback
+    
+    def create_model_section(self, parent, provider, model_type, config):
+        """Create a model configuration section."""
+        # Model section frame
+        section_frame = tk.Frame(parent, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
+        section_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        section_label = tk.Label(section_frame, text=f"{model_type.title()} Model", 
+                               bg="#212121", fg="#ffffff", font=("Arial", 14, "bold"))
+        section_label.pack(anchor="nw", padx=10, pady=(5, 0))
+        
+        content_frame = tk.Frame(section_frame, bg="#212121")
+        content_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
         row = 0
         
         # Model name
-        ttk.Label(content_frame, text="Model:", font=("Arial", 14, "bold")).grid(row=row, column=0, sticky="w", padx=5, pady=5)
+        tk.Label(content_frame, text="Model:", font=("Arial", 12, "bold"), bg="#212121", fg="#ffffff").grid(row=row, column=0, sticky="w", padx=5, pady=5)
         model_var = tk.StringVar(value=config.get("model", ""))
-        ttk.Entry(content_frame, textvariable=model_var, width=30).grid(row=row, column=1, sticky="ew", padx=5, pady=5)
-        setattr(self, f"{config_key}_model_var", model_var)
+        model_entry = ttk.Entry(content_frame, textvariable=model_var, width=30, style='Borderless.TEntry')
+        model_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
+        setattr(self, f"{provider}_{model_type}_model_var", model_var)
         row += 1
         
-        # Parameters (as plain text JSON)
-        ttk.Label(content_frame, text="Parameters:", font=("Arial", 14, "bold")).grid(row=row, column=0, sticky="nw", padx=5, pady=5)
+        # Parameters
+        tk.Label(content_frame, text="Parameters:", font=("Arial", 12, "bold"), bg="#212121", fg="#ffffff").grid(row=row, column=0, sticky="nw", padx=5, pady=5)
         
         # Extract parameters from config (exclude model and prompt)
         parameters = {}
@@ -375,46 +466,37 @@ class SettingsDialog(BaseDialog):
             if key not in ["model", "prompt"]:
                 parameters[key] = value
         
-        # Format parameters as JSON string
         parameters_json = json.dumps(parameters, indent=2)
         
-        # Create frame for parameters text widget with scrollbar
-        params_frame = ttk.Frame(content_frame)
+        params_frame = tk.Frame(content_frame, bg="#212121")
         params_frame.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
         
-        parameters_text = scrolledtext.ScrolledText(params_frame, width=60, height=8, wrap=tk.WORD,
+        parameters_text = scrolledtext.ScrolledText(params_frame, width=50, height=6, wrap=tk.WORD,
                                                    bg="#3c3c3c", fg="#ffffff",
                                                    insertbackground="#ffffff",
                                                    selectbackground="#404040")
         parameters_text.pack(fill=tk.BOTH, expand=True)
         parameters_text.insert("1.0", parameters_json)
-        setattr(self, f"{config_key}_parameters_text", parameters_text)
+        setattr(self, f"{provider}_{model_type}_parameters_text", parameters_text)
         row += 1
         
         # Prompt
-        ttk.Label(content_frame, text="Prompt:", font=("Arial", 14, "bold")).grid(row=row, column=0, sticky="nw", padx=5, pady=5)
+        tk.Label(content_frame, text="Prompt:", font=("Arial", 12, "bold"), bg="#212121", fg="#ffffff").grid(row=row, column=0, sticky="nw", padx=5, pady=5)
         
-        # Create frame for prompt text widget with scrollbar
-        prompt_frame = ttk.Frame(content_frame)
+        prompt_frame = tk.Frame(content_frame, bg="#212121")
         prompt_frame.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
         
-        prompt_text = scrolledtext.ScrolledText(prompt_frame, width=60, height=22, wrap=tk.WORD,
+        prompt_text = scrolledtext.ScrolledText(prompt_frame, width=50, height=15, wrap=tk.WORD,
                                                bg="#3c3c3c", fg="#ffffff",
                                                insertbackground="#ffffff",
                                                selectbackground="#404040")
         prompt_text.pack(fill=tk.BOTH, expand=True)
         prompt_text.insert("1.0", config.get("prompt", ""))
-        setattr(self, f"{config_key}_prompt_text", prompt_text)
+        setattr(self, f"{provider}_{model_type}_prompt_text", prompt_text)
         row += 1
         
-        # Configure grid weights to make the content expand properly
+        # Configure grid weights
         content_frame.columnconfigure(1, weight=1)
-        content_frame.rowconfigure(1, weight=1)  # Parameters row
-        content_frame.rowconfigure(2, weight=1)  # Prompt row
-        
-        # Store references for any needed updates
-        setattr(self, f"{config_key}_content_frame", content_frame)
-        setattr(self, f"{config_key}_container_frame", container_frame)
     
     def create_general_settings(self, parent):
         """Create general settings widgets."""
@@ -476,42 +558,46 @@ class SettingsDialog(BaseDialog):
     def save_settings(self):
         """Save the current settings."""
         try:
-            # Update primary config
-            primary_config = self.config["primary"]
-            primary_config.clear()  # Clear existing config
-            primary_config["model"] = self.primary_model_var.get()
-            primary_config["prompt"] = self.primary_prompt_text.get("1.0", tk.END).strip()
-            
-            # Parse and add parameters from JSON text
-            parameters_text = self.primary_parameters_text.get("1.0", tk.END).strip()
-            if parameters_text:
-                try:
-                    parameters = json.loads(parameters_text)
-                    primary_config.update(parameters)
-                except json.JSONDecodeError as e:
-                    messagebox.showerror("Invalid JSON", f"Primary parameters contain invalid JSON: {e}")
-                    return
-            
-            # Update fallback config
-            fallback_config = self.config["fallback"]
-            fallback_config.clear()  # Clear existing config
-            fallback_config["model"] = self.fallback_model_var.get()
-            fallback_config["prompt"] = self.fallback_prompt_text.get("1.0", tk.END).strip()
-            
-            # Parse and add parameters from JSON text
-            parameters_text = self.fallback_parameters_text.get("1.0", tk.END).strip()
-            if parameters_text:
-                try:
-                    parameters = json.loads(parameters_text)
-                    fallback_config.update(parameters)
-                except json.JSONDecodeError as e:
-                    messagebox.showerror("Invalid JSON", f"Fallback parameters contain invalid JSON: {e}")
-                    return
+            # Update provider configs
+            for provider in ["openai", "anthropic", "openrouter", "google"]:
+                if provider not in self.provider_configs:
+                    self.provider_configs[provider] = {}
+                
+                # API key
+                api_key_var = getattr(self, f"{provider}_api_key_var")
+                self.provider_configs[provider]["api_key"] = api_key_var.get()
+                
+                # Primary and fallback configs
+                for model_type in ["primary", "fallback"]:
+                    if model_type not in self.provider_configs[provider]:
+                        self.provider_configs[provider][model_type] = {}
+                    
+                    config = self.provider_configs[provider][model_type]
+                    config.clear()
+                    
+                    # Model
+                    model_var = getattr(self, f"{provider}_{model_type}_model_var")
+                    config["model"] = model_var.get()
+                    
+                    # Prompt
+                    prompt_text = getattr(self, f"{provider}_{model_type}_prompt_text")
+                    config["prompt"] = prompt_text.get("1.0", tk.END).strip()
+                    
+                    # Parameters
+                    parameters_text = getattr(self, f"{provider}_{model_type}_parameters_text")
+                    parameters_str = parameters_text.get("1.0", tk.END).strip()
+                    if parameters_str:
+                        try:
+                            parameters = json.loads(parameters_str)
+                            config.update(parameters)
+                        except json.JSONDecodeError as e:
+                            messagebox.showerror("Invalid JSON", f"{provider.title()} {model_type} parameters contain invalid JSON: {e}")
+                            return
             
             # Update general settings
             self.general_settings["max_workers"] = self.threads_var.get()
             
-            self.result = {"config": self.config, "general_settings": self.general_settings}
+            self.result = {"provider_configs": self.provider_configs, "general_settings": self.general_settings}
             self.cancel()
             
         except Exception as e:
@@ -521,25 +607,81 @@ class SettingsDialog(BaseDialog):
         """Handle tab change event to refresh display."""
         # Get the currently selected tab
         selected_tab = self.notebook.select()
-        tab_text = self.notebook.tab(selected_tab, "text")
+        tab_text = self.notebook.tab(selected_tab, "text").lower()
         
-        # Force update for all tabs to ensure content is visible
-        self.update_idletasks()
+        # Force update for provider tabs that use canvas
+        if tab_text in ["openai", "anthropic", "openrouter", "google"]:
+            def force_canvas_display():
+                if hasattr(self, f"{tab_text}_canvas") and hasattr(self, f"{tab_text}_scrollable_frame"):
+                    canvas = getattr(self, f"{tab_text}_canvas")
+                    scrollable_frame = getattr(self, f"{tab_text}_scrollable_frame")
+                    
+                    # Force the canvas to be visible and mapped
+                    canvas.update_idletasks()
+                    scrollable_frame.update_idletasks()
+                    
+                    # Trigger configure events
+                    canvas.event_generate('<Configure>')
+                    
+                    # Force focus and mapping
+                    canvas.focus_set()
+                    
+                    # Programmatically trigger mouse enter to force display
+                    canvas.event_generate('<Enter>')
+                    
+                    # Force scroll region update
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                    
+                    # Additional forced update
+                    self.update()
+            
+            # Immediate update
+            self.update_idletasks()
+            force_canvas_display()
+            
+            # Also schedule a delayed update to ensure it takes effect
+            self.after(10, force_canvas_display)
+            self.after(50, force_canvas_display)
     
     def force_initial_update(self):
         """Force initial update of all tabs to ensure proper display."""
         # Update the dialog and all its children
         self.update_idletasks()
+        
+        # Force update for all provider canvases
+        for provider in ["openai", "anthropic", "openrouter", "google"]:
+            if hasattr(self, f"{provider}_canvas"):
+                canvas = getattr(self, f"{provider}_canvas")
+                canvas.update_idletasks()
+                # Force width recalculation
+                self.after(10, lambda c=canvas: c.event_generate('<Configure>'))
+    
+    def force_canvas_layout(self):
+        """Force all canvas widgets to recalculate their layout."""
+        for provider in ["openai", "anthropic", "openrouter", "google"]:
+            if hasattr(self, f"{provider}_canvas"):
+                canvas = getattr(self, f"{provider}_canvas")
+                canvas.update_idletasks()
+                canvas.event_generate('<Configure>')
+                # Ensure scrollregion is updated too
+                canvas.configure(scrollregion=canvas.bbox("all"))
     
     def reset_defaults(self):
         """Reset to default settings."""
         if messagebox.askyesno("Reset Settings", "Are you sure you want to reset all settings to defaults?"):
-            # Create a new OCR instance to get default config
-            temp_ocr = HandwritingOCR("dummy_key")
-            self.config = temp_ocr.transcription_config.copy()
+            # Create default provider configs
+            default_configs = {}
+            for provider in ["openai", "anthropic", "openrouter", "google"]:
+                temp_ocr = HandwritingOCR("dummy_key", provider=provider)
+                default_configs[provider] = {
+                    "api_key": "",
+                    "primary": temp_ocr.transcription_config["primary"].copy(),
+                    "fallback": temp_ocr.transcription_config["fallback"].copy()
+                }
+            
+            # Set result to indicate defaults should be applied
+            self.result = {"provider_configs": default_configs, "general_settings": {"max_workers": 1}}
             self.cancel()
-            # Recreate dialog with defaults
-            self.__init__(self.parent, self.config)
 
 
 class OCRProgressDialog(BaseDialog):
@@ -747,10 +889,19 @@ class OCRApp:
         # Set up logging system
         self.setup_logging()
         
-        # Initialize OCR processor (will be created when API key is set)
+        # Initialize OCR processor (will be created when provider and API key are set)
         self.ocr_processor = None
-        self.api_key = ""
+        self.selected_provider = "openai"  # Default provider
+        self.provider_configs = {
+            "openai": {"api_key": "", "primary": {}, "fallback": {}},
+            "anthropic": {"api_key": "", "primary": {}, "fallback": {}},
+            "openrouter": {"api_key": "", "primary": {}, "fallback": {}},
+            "google": {"api_key": "", "primary": {}, "fallback": {}}
+        }
         self.general_settings = {"max_workers": 1}  # Default general settings
+        
+        # Initialize default configs for all providers
+        self._initialize_default_configs()
         
         # Load settings using platform-appropriate path
         self.settings_file = Path(get_settings_path())
@@ -762,9 +913,26 @@ class OCRApp:
         # Update GUI after loading settings
         self.update_gui_after_loading()
         
-        # Center window
+                # Center window
         self.center_window()
     
+    def _initialize_default_configs(self):
+        """Initialize default configurations for all providers."""
+        for provider in ["openai", "anthropic", "openrouter", "google"]:
+            if not self.provider_configs[provider].get("primary") or not self.provider_configs[provider].get("fallback"):
+                try:
+                    temp_ocr = HandwritingOCR("dummy_key", provider=provider)
+                    if not self.provider_configs[provider].get("primary"):
+                        self.provider_configs[provider]["primary"] = temp_ocr.transcription_config["primary"].copy()
+                    if not self.provider_configs[provider].get("fallback"):
+                        self.provider_configs[provider]["fallback"] = temp_ocr.transcription_config["fallback"].copy()
+                except Exception:
+                    # Use basic defaults if can't create temp OCR
+                    if not self.provider_configs[provider].get("primary"):
+                        self.provider_configs[provider]["primary"] = {"model": "", "prompt": ""}
+                    if not self.provider_configs[provider].get("fallback"):
+                        self.provider_configs[provider]["fallback"] = {"model": "", "prompt": ""}
+ 
     def setup_logging(self):
         """Set up the logging system for real-time log viewing."""
         # Create a queue for log messages
@@ -1100,15 +1268,26 @@ class OCRApp:
         return outer_frame, inner_frame
 
     def _create_api_section(self, parent):
-        """Create the API key input section."""
-        api_outer_frame, api_inner_frame = self._create_section(parent, "OpenAI API Configuration")
-        api_outer_frame.pack(fill=tk.X, pady=(0, 10))
+        """Create the provider selection section."""
+        provider_outer_frame, provider_inner_frame = self._create_section(parent, "AI Provider Configuration")
+        provider_outer_frame.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(api_inner_frame, text="API Key:", bg="#212121", fg="#ffffff", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(0, 5))
-        self.api_key_var = tk.StringVar(value=self.api_key)
-        self.api_key_entry = ttk.Entry(api_inner_frame, textvariable=self.api_key_var, show="*", width=50, style='Borderless.TEntry')
-        self.api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(api_inner_frame, text="Set", command=self.set_api_key, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(5, 0))
+        # Create a grid layout for better spacing
+        provider_inner_frame.grid_columnconfigure(1, weight=1)
+        provider_inner_frame.grid_columnconfigure(2, weight=2)
+        
+        tk.Label(provider_inner_frame, text="Provider:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=5)
+        
+        self.provider_var = tk.StringVar(value=self.selected_provider)
+        provider_combo = ttk.Combobox(provider_inner_frame, textvariable=self.provider_var, 
+                                    values=["OpenAI", "Anthropic", "OpenRouter", "Google"], 
+                                    state="readonly", width=25, font=("Arial", 14, "bold"))
+        provider_combo.grid(row=0, column=1, sticky="ew", padx=(0, 15), pady=5)
+        provider_combo.bind("<<ComboboxSelected>>", self.on_provider_changed)
+        
+        # Status label
+        self.provider_status_label = tk.Label(provider_inner_frame, text="", bg="#212121", fg="#ffffff", font=("Arial", 12))
+        self.provider_status_label.grid(row=0, column=2, sticky="w", pady=5)
 
     def _create_settings_button_section(self, parent):
         """Create the 'Edit Settings' button."""
@@ -1130,7 +1309,7 @@ class OCRApp:
         self.drop_icon = tk.Label(drop_container, text="📁", font=("Arial", 64), anchor="center", bg="#212121", fg="#ffffff")
         self.drop_icon.pack(pady=(0, 10))
 
-        self.drop_label = tk.Label(drop_container, text="Drag JPEG files here\nor click to browse", font=("Arial", 16), anchor="center", justify="center", bg="#212121", fg="#ffffff")
+        self.drop_label = tk.Label(drop_container, text="Drag image/PDF files here\nor click to browse", font=("Arial", 16), anchor="center", justify="center", bg="#212121", fg="#ffffff")
         self.drop_label.pack()
 
         for widget in [self.drop_icon, self.drop_label, drop_container, self.drop_frame]:
@@ -1164,7 +1343,7 @@ class OCRApp:
 
     def _create_status_bar(self, parent):
         """Create the status bar at the bottom."""
-        self.status_var = tk.StringVar(value=f"Ready - Please set your OpenAI API key | v{VERSION}")
+        self.status_var = tk.StringVar(value=f"Ready - Configure AI provider in Settings | v{VERSION}")
         status_bar = ttk.Entry(parent, textvariable=self.status_var, state="readonly")
         status_bar.pack(fill=tk.X, pady=(5, 0))
 
@@ -1188,9 +1367,11 @@ class OCRApp:
     def browse_files(self, event=None):
         """Open file browser to select files."""
         files = filedialog.askopenfilenames(
-            title="Select JPEG files",
+            title="Select image and PDF files",
             filetypes=[
-                ("JPEG files", "*.jpg *.jpeg *.JPG *.JPEG"),
+                ("All supported", "*.jpg *.jpeg *.png *.pdf *.JPG *.JPEG *.PNG *.PDF"),
+                ("Image files", "*.jpg *.jpeg *.png *.JPG *.JPEG *.PNG"),
+                ("PDF files", "*.pdf *.PDF"),
                 ("All files", "*.*")
             ]
         )
@@ -1201,14 +1382,14 @@ class OCRApp:
         """Add files to the processing list."""
         added_count = 0
         for file_path in files:
-            # Check if it's a JPEG file
-            if file_path.lower().endswith(('.jpg', '.jpeg')):
+            # Check if it's a supported file type
+            if file_path.lower().endswith(('.jpg', '.jpeg', '.png', '.pdf')):
                 if file_path not in self.file_paths:
                     self.file_paths.append(file_path)
                     self.file_listbox.insert(tk.END, os.path.basename(file_path))
                     added_count += 1
             else:
-                messagebox.showwarning("Invalid File", f"Skipping non-JPEG file: {os.path.basename(file_path)}")
+                messagebox.showwarning("Invalid File", f"Skipping unsupported file: {os.path.basename(file_path)} (only JPEG, PNG, and PDF files are supported)")
         
         if added_count > 0:
             self.status_var.set(f"Added {added_count} file(s). Total: {len(self.file_paths)} files")
@@ -1239,41 +1420,71 @@ class OCRApp:
             self.process_button.config(state="normal")
         else:
             self.process_button.config(state="disabled")
-            
-    def set_api_key(self):
-        """Set the OpenAI API key."""
-        api_key = self.api_key_var.get().strip()
+    
+    def on_provider_changed(self, event=None):
+        """Handle provider selection change."""
+        # Convert display name to internal name
+        display_to_internal = {"OpenAI": "openai", "Anthropic": "anthropic", "OpenRouter": "openrouter", "Google": "google"}
+        self.selected_provider = display_to_internal.get(self.provider_var.get(), self.provider_var.get().lower())
+        self.update_provider_status()
+        self.try_create_ocr_processor()
+        self.update_process_button()
+        self.save_settings()
+    
+    def update_provider_status(self):
+        """Update the provider status display."""
+        provider_config = self.provider_configs.get(self.selected_provider, {})
+        api_key = provider_config.get("api_key", "")
+        
+        # Proper display names for providers
+        provider_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
+        display_name = provider_names.get(self.selected_provider, self.selected_provider.title())
+        
+        if api_key:
+            self.provider_status_label.config(text=f"✓ {display_name} API key configured", fg="#00ff00")
+        else:
+            self.provider_status_label.config(text=f"⚠ No {display_name} API key set - Configure in Settings", fg="#ffaa00")
+    
+    def try_create_ocr_processor(self):
+        """Try to create OCR processor with current provider and API key."""
+        provider_config = self.provider_configs.get(self.selected_provider, {})
+        api_key = provider_config.get("api_key", "")
+        
         if not api_key:
-            messagebox.showerror("Error", "Please enter a valid API key", parent=self.root)
-            return
+            self.ocr_processor = None
+            return False
             
         try:
-            # Test the API key by creating an OCR processor with current max_workers setting
             max_workers = self.general_settings.get("max_workers", 1)
-            self.ocr_processor = HandwritingOCR(api_key, max_workers=max_workers)
-            self.api_key = api_key
-            self.status_var.set(f"API key set successfully - Ready to process files | v{VERSION}")
-            messagebox.showinfo("Success", "API key set successfully!", parent=self.root)
-            self.update_process_button()
-            self.save_settings()
+            self.ocr_processor = HandwritingOCR(api_key, provider=self.selected_provider, max_workers=max_workers)
+            
+            # Update transcription config with saved settings
+            if "primary" in provider_config and "fallback" in provider_config:
+                self.ocr_processor.transcription_config = {
+                    "primary": provider_config["primary"].copy(),
+                    "fallback": provider_config["fallback"].copy()
+                }
+            
+            self.status_var.set(f"{self.selected_provider.title()} provider ready - Ready to process files | v{VERSION}")
+            return True
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to set API key: {e}", parent=self.root)
+            self.ocr_processor = None
+            self.status_var.set(f"Error with {self.selected_provider.title()} provider: {str(e)} | v{VERSION}")
+            return False
             
     def open_settings(self):
         """Open the settings dialog."""
-        if not self.ocr_processor:
-            messagebox.showwarning("No API Key", "Please set your OpenAI API key first", parent=self.root)
-            return
-            
-        dialog = SettingsDialog(self.root, self.ocr_processor.transcription_config, self.general_settings)
+        dialog = SettingsDialog(self.root, self.provider_configs, self.general_settings)
         self.root.wait_window(dialog)
         
         if dialog.result:
-            self.ocr_processor.transcription_config = dialog.result["config"]
+            self.provider_configs = dialog.result["provider_configs"]
             self.general_settings = dialog.result["general_settings"]
             
-            # Update the OCR processor with new max_workers setting
-            self.ocr_processor.max_workers = self.general_settings["max_workers"]
+            # Update provider status and try to recreate OCR processor
+            self.update_provider_status()
+            self.try_create_ocr_processor()
+            self.update_process_button()
             
             self.save_settings()
             self.status_var.set(f"Settings updated | v{VERSION}")
@@ -1285,8 +1496,19 @@ class OCRApp:
             return
             
         if not self.ocr_processor:
-            messagebox.showerror("No API Key", "Please set your OpenAI API key first", parent=self.root)
+            messagebox.showerror("No API Key", "Please configure your AI provider API key in Settings first", parent=self.root)
             return
+        
+        # Check if we have PDF files and PyMuPDF is available
+        pdf_files = [f for f in self.file_paths if f.lower().endswith('.pdf')]
+        if pdf_files:
+            try:
+                import fitz  # PyMuPDF
+            except ImportError:
+                messagebox.showerror("Missing Dependency", 
+                                   "PDF processing requires PyMuPDF. Please install it with:\n\npip install PyMuPDF", 
+                                   parent=self.root)
+                return
             
         progress_dialog = OCRProgressDialog(self.root, len(self.file_paths), self.log_queue)
         
@@ -1397,16 +1619,24 @@ class OCRApp:
             
     def update_gui_after_loading(self):
         """Update GUI elements after loading settings."""
-        # Update the API key field to show the loaded API key
-        if hasattr(self, 'api_key_var') and self.api_key:
-            self.api_key_var.set(self.api_key)
+        # Update the provider selection
+        if hasattr(self, 'provider_var'):
+            # Convert internal name to display name
+            internal_to_display = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
+            display_name = internal_to_display.get(self.selected_provider, self.selected_provider.title())
+            self.provider_var.set(display_name)
+            
+        # Update provider status and try to create OCR processor
+        if hasattr(self, 'provider_status_label'):
+            self.update_provider_status()
+            self.try_create_ocr_processor()
             
         # Update status based on whether we have a valid OCR processor
         if hasattr(self, 'status_var'):
             if self.ocr_processor:
-                self.status_var.set(f"API key loaded - Ready to process files | v{VERSION}")
+                self.status_var.set(f"{self.selected_provider.title()} provider ready - Ready to process files | v{VERSION}")
             else:
-                self.status_var.set(f"Ready - Please set your OpenAI API key | v{VERSION}")
+                self.status_var.set(f"Ready - Configure API key in Settings | v{VERSION}")
                 
         # Update process button state
         self.update_process_button()
@@ -1417,20 +1647,42 @@ class OCRApp:
             if self.settings_file.exists():
                 with open(self.settings_file, 'r') as f:
                     settings = json.load(f)
-                    self.api_key = settings.get("api_key", "")
+                    
+                    # Load provider configs
+                    self.provider_configs = settings.get("provider_configs", {
+                        "openai": {"api_key": "", "primary": {}, "fallback": {}},
+                        "anthropic": {"api_key": "", "primary": {}, "fallback": {}},
+                        "openrouter": {"api_key": "", "primary": {}, "fallback": {}},
+                        "google": {"api_key": "", "primary": {}, "fallback": {}}
+                    })
+                    
+                    # Load selected provider
+                    self.selected_provider = settings.get("selected_provider", "openai")
+                    
+                    # Load general settings
                     self.general_settings = settings.get("general_settings", {"max_workers": 1})
                     
-                    # If we have an API key, try to create the OCR processor
-                    if self.api_key:
-                        try:
-                            max_workers = self.general_settings.get("max_workers", 1)
-                            self.ocr_processor = HandwritingOCR(self.api_key, max_workers=max_workers)
-                            # Load custom transcription config if available
-                            if "transcription_config" in settings:
-                                self.ocr_processor.transcription_config = settings["transcription_config"]
-                        except Exception:
-                            # If API key is invalid, clear it
-                            self.api_key = ""
+                    # Ensure all providers have default configs if missing
+                    for provider in ["openai", "anthropic", "openrouter", "google"]:
+                        if provider not in self.provider_configs:
+                            self.provider_configs[provider] = {"api_key": "", "primary": {}, "fallback": {}}
+                    
+                    # Load default provider configs if missing primary/fallback
+                    for provider in ["openai", "anthropic", "openrouter", "google"]:
+                        provider_config = self.provider_configs[provider]
+                        if not provider_config.get("primary") or not provider_config.get("fallback"):
+                            try:
+                                temp_ocr = HandwritingOCR("dummy_key", provider=provider)
+                                if not provider_config.get("primary"):
+                                    provider_config["primary"] = temp_ocr.transcription_config["primary"].copy()
+                                if not provider_config.get("fallback"):
+                                    provider_config["fallback"] = temp_ocr.transcription_config["fallback"].copy()
+                            except Exception:
+                                # Use basic defaults if can't create temp OCR
+                                if not provider_config.get("primary"):
+                                    provider_config["primary"] = {"model": "", "prompt": ""}
+                                if not provider_config.get("fallback"):
+                                    provider_config["fallback"] = {"model": "", "prompt": ""}
         except Exception as e:
             print(f"Error loading settings: {e}")
             
@@ -1438,13 +1690,10 @@ class OCRApp:
         """Save settings to file."""
         try:
             settings = {
-                "api_key": self.api_key,
+                "provider_configs": self.provider_configs,
+                "selected_provider": self.selected_provider,
                 "general_settings": self.general_settings,
             }
-            
-            # Save transcription config if we have an OCR processor
-            if self.ocr_processor:
-                settings["transcription_config"] = self.ocr_processor.transcription_config
                 
             with open(self.settings_file, 'w') as f:
                 json.dump(settings, f, indent=2)

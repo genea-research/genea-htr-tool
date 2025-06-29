@@ -32,30 +32,55 @@ def check_dependencies():
     """Check if all required dependencies are installed."""
     print("Checking dependencies...")
     
-    # Map package names to their import names
-    package_imports = {
+    # Map package names to their import names (required dependencies)
+    required_package_imports = {
         'openai': 'openai',
         'Pillow': 'PIL',
         'reportlab': 'reportlab',
         'tkinterdnd2': 'tkinterdnd2',
+        'requests': 'requests',
+        'PyMuPDF': 'fitz',  # PyMuPDF imports as 'fitz'
         'pyinstaller==6.9.0': 'PyInstaller'
     }
     
-    missing_packages = []
-    for package, import_name in package_imports.items():
+    # Optional dependencies (for different AI providers)
+    optional_package_imports = {
+        'anthropic': 'anthropic',
+        'google-generativeai': 'google.generativeai'
+    }
+    
+    missing_required = []
+    missing_optional = []
+    
+    # Check required dependencies
+    for package, import_name in required_package_imports.items():
         try:
             __import__(import_name)
             print(f"[OK] {package} is installed")
         except ImportError:
-            missing_packages.append(package)
-            print(f"[MISSING] {package} is missing")
+            missing_required.append(package)
+            print(f"[MISSING] {package} is missing (REQUIRED)")
     
-    if missing_packages:
-        print(f"\n[ERROR] Missing packages: {', '.join(missing_packages)}")
-        print("Please install them with: pip install " + " ".join(missing_packages))
+    # Check optional dependencies
+    for package, import_name in optional_package_imports.items():
+        try:
+            __import__(import_name)
+            print(f"[OK] {package} is installed (optional)")
+        except ImportError:
+            missing_optional.append(package)
+            print(f"[INFO] {package} is missing (optional - needed for specific AI providers)")
+    
+    if missing_required:
+        print(f"\n[ERROR] Missing required packages: {', '.join(missing_required)}")
+        print("Please install them with: pip install " + " ".join(missing_required))
         return False
     
-    print("[SUCCESS] All dependencies are installed!")
+    if missing_optional:
+        print(f"\n[INFO] Missing optional packages: {', '.join(missing_optional)}")
+        print("These are only needed if you plan to use specific AI providers.")
+        print("You can install them with: pip install " + " ".join(missing_optional))
+    
+    print("[SUCCESS] All required dependencies are installed!")
     return True
 
 def clean_build_directories():

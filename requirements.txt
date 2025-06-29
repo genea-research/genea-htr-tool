@@ -1,4 +1,24 @@
+# Core dependencies (required for all providers)
 openai>=1.20.0
 Pillow>=10.0.0
 reportlab>=4.0.0
 tkinterdnd2>=0.3.0
+requests>=2.25.0
+PyMuPDF>=1.23.0  # For PDF processing support
+
+# Optional dependencies for specific providers
+# For Claude API support:
+anthropic>=0.30.0
+
+# For Google Gemini API support:
+google-generativeai>=0.3.0
+
+# For OpenRouter API support:
+# (uses requests, already listed above)
+
+# Note: Install only the dependencies you need:
+# For OpenAI only: pip install openai Pillow reportlab tkinterdnd2 requests PyMuPDF
+# For Claude: pip install anthropic openai Pillow reportlab tkinterdnd2 requests PyMuPDF
+# For Google Gemini: pip install google-generativeai openai Pillow reportlab tkinterdnd2 requests PyMuPDF
+# For OpenRouter: pip install openai Pillow reportlab tkinterdnd2 requests PyMuPDF
+# For all providers: pip install -r requirements.txt
