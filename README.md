@@ -1,6 +1,6 @@
 # Genealogy Assistant AI Handwritten Text Recognition Tool
 
-A free cross-platform application designed to transcribe collections of historical documents into an easier-to-read format. It serves as a front-end to multiple AI APIs (OpenAI, Claude, OpenRouter, and Google Gemini), allowing you to convert image files (JPEG, PNG) and PDF documents into searchable, transcribed PDF's with the source image attached. 
+A free cross-platform application designed to transcribe collections of historical documents into an easier-to-read format. It serves as a front-end to multiple AI APIs (OpenAI, Claude, OpenRouter, and Google Gemini), allowing you to convert image files (JPEG, PNG) and PDF documents into either searchable PDF files (with source images attached), plain text (txt) files, or CSV files.
 
 This tool can transcribe thousands of images and PDF pages in a single batch, without the need for user intervention. It is generally not meant to provide 100% accurate transcriptions, as AI transcription are still not perfect, but it is designed to make large collections of documents more readable for humans. 
 
@@ -27,7 +27,7 @@ This software is licensed under the **GNU General Public License v3.0 (GPLv3)**.
 
 - **Highly Customizable Settings**: Fine-tune the AI's transcription behaviour to match your specific transcription needs with adjustable prompts and parameters such as temperature and token limits.
 
-- **Instantly Searchable PDFs**: Your documents are converted into PDFs that preserve the original image while embedding high-quality, searchable transcriptions that are more easily readable. 
+- **Flexible Output Formats**: Choose between searchable PDFs (that preserve the original image with embedded transcriptions), plain text or CSV files for lightweight, easily readable transcriptions. 
 
 ## AI Provider Support
 
@@ -129,7 +129,7 @@ To launch the GUI, run the following command from your terminal:
 python genea_htr_gui.py
 ```
 
-This will open the GUI application that allows you to select your image directory, enter your API key, and start the transcription process without using command-line arguments.
+This will open the GUI application that allows you to select your image directory, choose your AI provider, select your output format (PDF, TXT, or CSV), configure your API key, and start the transcription process without using command-line arguments.
 
 ## Quick Start
 
@@ -137,10 +137,10 @@ This will open the GUI application that allows you to select your image director
 To process all supported files (JPEG, PNG, PDF) in a specific folder, provide the path to the directory.
 
 ```bash
-# Process all supported files using default OpenAI provider
+# Process all supported files using default OpenRouter provider
 python genea_htr.py /path/to/my-documents
 
-# Use Claude instead of OpenAI
+# Use Claude instead of the default OpenRouter
 python genea_htr.py /path/to/my-documents --provider anthropic
 
 # Use Google Gemini
@@ -163,8 +163,14 @@ python genea_htr.py /path/to/images --provider anthropic --api-key "your-anthrop
 # Save the output PDFs to a custom directory
 python genea_htr.py /path/to/images --output-dir "results"
 
+# Generate text files instead of PDFs
+python genea_htr.py /path/to/images --output-format txt
+
+# Generate a CSV file with all transcriptions
+python genea_htr.py /path/to/images --output-format csv
+
 # Combine options for maximum customization
-python genea_htr.py /path/to/images --provider openrouter --threads 3 --api-key "your-key"
+python genea_htr.py /path/to/images --provider openrouter --threads 3 --api-key "your-key" --output-format csv
 ```
 
 ## File Organization
@@ -178,14 +184,15 @@ The tool supports multiple document formats:
 The tool will automatically find all supported files in the directory you specify.
 
 ### Output Structure
-By default, the tool creates a `PDFs` subdirectory inside your input directory to store the generated files.
+By default, the tool creates output files in your input directory. For PDF and TXT formats, it creates a subdirectory (`PDF` or `TXT`). For CSV format, it creates a single file called `transcribed_images.csv` in the input directory.
 
+**PDF Output Format (default):**
 ```
 your-documents/
 ├── document1.jpg          # Your original JPEG image
 ├── document2.png          # Your original PNG image  
 ├── document3.pdf          # Your original PDF (3 pages)
-└── PDFs/                  # New folder created by the tool
+└── PDF/                  # New folder created by the tool
     ├── document1.pdf      # Searchable PDF with image and transcription
     ├── document2.pdf      # Searchable PDF with image and transcription
     ├── document3_page_1.pdf  # Searchable PDF for PDF page 1
@@ -193,22 +200,62 @@ your-documents/
     └── document3_page_3.pdf  # Searchable PDF for PDF page 3
 ```
 
+**TXT Output Format:**
+```
+your-documents/
+├── document1.jpg          # Your original JPEG image
+├── document2.png          # Your original PNG image  
+├── document3.pdf          # Your original PDF (3 pages)
+└── TXT/                   # New folder created by the tool
+    ├── document1.txt      # Plain text transcription with metadata header
+    ├── document2.txt      # Plain text transcription with metadata header
+    ├── document3_page_1.txt  # Plain text transcription for PDF page 1
+    ├── document3_page_2.txt  # Plain text transcription for PDF page 2
+    └── document3_page_3.txt  # Plain text transcription for PDF page 3
+```
+
+**CSV Output Format:**
+```
+your-documents/
+├── document1.jpg          # Your original JPEG image
+├── document2.png          # Your original PNG image  
+├── document3.pdf          # Your original PDF (3 pages)
+└── transcribed_images.csv # Single CSV file with all transcriptions
+```
+
 You can specify a different output location using the `--output-dir` option.
 
-### PDF Structure
+### Output File Structure
+
+**PDF Files:**
 Each generated PDF file contains:
 - **Page 1+**: The complete text transcription with corresponding formatting.
 - **Last page**: The original image, preserved at full resolution (equivalent to 300 DPI).
+
+**TXT Files:**
+Each generated TXT file contains:
+- **Header**: Metadata including filename, AI provider, model used, and generation timestamp.
+- **Body**: Clean text transcription optimized for readability and searchability.
+
+**CSV Files:**
+The generated CSV file contains:
+- **Column 1 (filename)**: Name of the original image file
+- **Column 2 (transcription)**: Full text transcription in plain text format
+- **Column 3 (model)**: AI provider and model used for transcription
+- **Column 4 (date)**: Generation timestamp
+
+*Note: CSV text is automatically cleaned to handle Unicode characters and special symbols (like ≈, ø, æ) by converting them to ASCII equivalents for better compatibility with spreadsheet applications.*
 
 ## Command-Line Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
 | `input_dir` | The directory containing image files (JPEG, PNG) and PDF documents to process. **Required**. | `python genea_htr.py ./documents` |
-| `--provider` | AI provider to use: `openai`, `anthropic`, `google`, or `openrouter` (default: `openai`). | `--provider google` |
+| `--provider` | AI provider to use: `openai`, `anthropic`, `google`, or `openrouter` (default: `openrouter`). | `--provider google` |
 | `--api-key` | API key for the chosen provider. Optional if environment variable is set. | `--api-key "your-key"` |
+| `--output-format` | Output format: `pdf`, `txt`, or `csv` (default: `pdf`). | `--output-format csv` |
 | `--threads` or `-t` | Number of concurrent threads for processing (1-10, default: 1). | `--threads 3` |
-| `--output-dir` | A custom directory for output PDFs. Defaults to a `PDFs` folder inside the `input_dir`. | `--output-dir "results"` |
+| `--output-dir` | A custom directory for output files. Defaults to a `PDF` or `TXT` folder inside the `input_dir`. | `--output-dir "results"` |
 
 ## Concurrent Processing
 
@@ -217,7 +264,7 @@ The tool can process multiple files simultaneously to reduce the total processin
 ### Thread Count Recommendations
 - **1 thread**: Processes files one by one. This is the slowest but most stable option.
 - **2-3 threads**: A good balance of speed and stability, recommended for most use cases.
-- **4+ threads**: Offers the fastest processing but increases the risk of hitting OpenAI API rate limits.
+- **4+ threads**: Offers the fastest processing but increases the risk of hitting API rate limits.
 
 ### Examples
 ```bash
@@ -239,8 +286,8 @@ python genea_htr.py images/ --threads 3
    - **PDF documents**: Automatically split into individual pages at 300 DPI resolution for processing
 3. **AI Transcription**: Each image is sent to your chosen AI provider's primary model for transcription. If this fails, it automatically retries with a fallback model from the same provider.
 4. **Specialized Prompts**: It uses carefully designed prompts optimized for transcribing handwritten text from historical documents.
-5. **PDF Generation**: A searchable PDF is created for each image, containing the full-resolution image and the transcribed text.
-6. **Text Cleaning**: The transcribed text is sanitized to remove characters that could cause issues when creating the PDF.
+5. **Output Generation**: Based on your chosen format, either a searchable PDF (containing the full-resolution image and transcribed text) or a plain text file (with metadata header and transcription) is generated for each image. For CSV output, a single file is created for all images in the batch.
+6. **Text Cleaning**: The transcribed text is sanitized to remove problematic characters and ensure optimal output quality.
 
 ## Example Workflow
 
@@ -252,23 +299,55 @@ python genea_htr.py images/ --threads 3
    └── multi_page_record.pdf     # PDF document (3 pages)
    ```
 
-2. **Run the tool**, specifying the folder and desired number of threads:
+2. **Run the tool**, specifying the folder, output format, and desired number of threads:
    ```bash
+   # For PDF output (default)
    python genea_htr.py my-documents/ --threads 2
+   
+   # For TXT output
+   python genea_htr.py my-documents/ --output-format txt --threads 2
+   
+   # For CSV output
+   python genea_htr.py my-documents/ --output-format csv --threads 2
    ```
 
-3. **Find your results** in the newly created `PDFs` folder:
+3. **Find your results** in the newly created folder:
+
+   **PDF Output:**
    ```
    my-documents/
    ├── handwritten_letter.jpg
    ├── old_document.png
    ├── multi_page_record.pdf
-   └── PDFs/
+   └── PDF/
        ├── handwritten_letter.pdf          # Searchable PDF from JPEG
        ├── old_document.pdf                # Searchable PDF from PNG
        ├── multi_page_record_page_1.pdf    # Searchable PDF from PDF page 1
        ├── multi_page_record_page_2.pdf    # Searchable PDF from PDF page 2
        └── multi_page_record_page_3.pdf    # Searchable PDF from PDF page 3
+   ```
+
+   **TXT Output:**
+   ```
+   my-documents/
+   ├── handwritten_letter.jpg
+   ├── old_document.png
+   ├── multi_page_record.pdf
+   └── TXT/
+       ├── handwritten_letter.txt          # Text transcription from JPEG
+       ├── old_document.txt                # Text transcription from PNG
+       ├── multi_page_record_page_1.txt    # Text transcription from PDF page 1
+       ├── multi_page_record_page_2.txt    # Text transcription from PDF page 2
+       └── multi_page_record_page_3.txt    # Text transcription from PDF page 3
+   ```
+
+   **CSV Output:**
+   ```
+   my-documents/
+   ├── handwritten_letter.jpg
+   ├── old_document.png
+   ├── multi_page_record.pdf
+   └── transcribed_images.csv             # Single CSV with all transcriptions
    ```
 
 ## Cost Considerations

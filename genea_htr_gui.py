@@ -38,12 +38,14 @@ import logging
 from datetime import datetime
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import csv
+import unicodedata
 
 # Import the existing OCR functionality
 from genea_htr import HandwritingOCR
 
 # Application version
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 
 class BaseDialog(tk.Toplevel):
@@ -296,7 +298,7 @@ class SettingsDialog(BaseDialog):
         
         # Provider tabs
         provider_display_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
-        for provider in ["openai", "anthropic", "openrouter", "google"]:
+        for provider in ["openrouter", "anthropic", "google", "openai"]:
             provider_frame = ttk.Frame(notebook)
             notebook.add(provider_frame, text=provider_display_names[provider])
             self.create_provider_settings(provider_frame, provider)
@@ -504,26 +506,35 @@ class SettingsDialog(BaseDialog):
         settings_frame = ttk.Frame(parent)
         settings_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # Concurrent threads setting - use manual dark frame styling
-        threads_frame = tk.Frame(settings_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
-        threads_frame.pack(fill=tk.X, pady=(0, 20))
+        # Processing settings - use manual dark frame styling
+        proc_frame = tk.Frame(settings_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
+        proc_frame.pack(fill=tk.X, pady=(0, 20))
         
-        # Manual label for threads frame
-        threads_label = tk.Label(threads_frame, text="Processing Settings", 
+        # Manual label for processing frame
+        proc_label = tk.Label(proc_frame, text="Processing Settings", 
                                bg="#212121", fg="#ffffff", font=("Arial", 14, "bold"))
-        threads_label.pack(anchor="nw", padx=10, pady=(5, 0))
+        proc_label.pack(anchor="nw", padx=10, pady=(5, 0))
         
-        threads_inner = tk.Frame(threads_frame, bg="#212121")
-        threads_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
+        proc_inner = tk.Frame(proc_frame, bg="#212121")
+        proc_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        tk.Label(threads_inner, text="Concurrent Threads:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        # Concurrent threads setting
+        tk.Label(proc_inner, text="Concurrent Threads:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=0, column=0, sticky="w", padx=(0, 10))
         
         self.threads_var = tk.IntVar(value=self.general_settings.get("max_workers", 1))
-        threads_spinbox = ttk.Spinbox(threads_inner, from_=1, to=10, width=10, textvariable=self.threads_var)
+        threads_spinbox = ttk.Spinbox(proc_inner, from_=1, to=10, width=10, textvariable=self.threads_var)
         threads_spinbox.grid(row=0, column=1, sticky="w")
         
-        # Help text
-        help_text = tk.Label(threads_inner, 
+        # Output format setting
+        tk.Label(proc_inner, text="Default Output Format:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
+        
+        self.settings_output_format_var = tk.StringVar(value=self.general_settings.get("output_format", "PDF"))
+        format_spinbox = ttk.Combobox(proc_inner, textvariable=self.settings_output_format_var, values=["PDF", "TXT", "CSV"], 
+                                     state="readonly", width=8)
+        format_spinbox.grid(row=1, column=1, sticky="w", pady=(10, 0))
+        
+        # Help text for threads
+        help_text = tk.Label(proc_inner, 
                            text="Number of concurrent threads for processing files.\n"
                                 "Higher values may speed up processing but could hit API rate limits.\n"
                                 "Recommended: 1-3 threads for most use cases.",
@@ -531,7 +542,19 @@ class SettingsDialog(BaseDialog):
                            fg="#ffffff",
                            bg="#212121",
                            justify="left")
-        help_text.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        help_text.grid(row=2, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        
+        # Help text for output format
+        format_help_text = tk.Label(proc_inner, 
+                                   text="Default output format when opening the application.\n"
+                                        "PDF: Individual searchable PDFs with images\n"
+                                        "TXT: Individual text files with transcriptions\n"
+                                        "CSV: Single CSV file with all transcriptions",
+                                   font=("Arial", 14),
+                                   fg="#ffffff",
+                                   bg="#212121",
+                                   justify="left")
+        format_help_text.grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 0))
         
         # Performance note - use manual dark frame styling
         perf_frame = tk.Frame(settings_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
@@ -596,6 +619,7 @@ class SettingsDialog(BaseDialog):
             
             # Update general settings
             self.general_settings["max_workers"] = self.threads_var.get()
+            self.general_settings["output_format"] = self.settings_output_format_var.get()
             
             self.result = {"provider_configs": self.provider_configs, "general_settings": self.general_settings}
             self.cancel()
@@ -680,7 +704,7 @@ class SettingsDialog(BaseDialog):
                 }
             
             # Set result to indicate defaults should be applied
-            self.result = {"provider_configs": default_configs, "general_settings": {"max_workers": 1}}
+            self.result = {"provider_configs": default_configs, "general_settings": {"max_workers": 1, "output_format": "PDF"}}
             self.cancel()
 
 
@@ -785,18 +809,247 @@ class OCRProgressDialog(BaseDialog):
 class FileProcessor:
     """Handles the backend file processing logic."""
 
-    def __init__(self, ocr_processor, file_paths, max_workers, logger, progress_callback):
+    def __init__(self, ocr_processor, file_paths, max_workers, logger, progress_callback, output_format="PDF"):
         self.ocr_processor = ocr_processor
         self.file_paths = file_paths
         self.max_workers = max_workers
         self.logger = logger
         self.progress_callback = progress_callback
+        self.output_format = output_format
         self.cancelled = False
         self.processed_count = 0
 
     def cancel(self):
         """Cancel the processing task."""
         self.cancelled = True
+
+    def create_individual_txt(self, image_path: str, transcription: str, output_filename: str) -> str:
+        """
+        Create a text file for a single image transcription.
+        
+        Args:
+            image_path: Path to the image file
+            transcription: Transcribed text
+            output_filename: Output TXT filename
+            
+        Returns:
+            Path to the created TXT file
+        """
+        # Create TXT folder in the same directory as the source image
+        image_dir = Path(image_path).parent
+        txt_dir = image_dir / "TXT"
+        txt_dir.mkdir(exist_ok=True)
+        
+        txt_path = txt_dir / output_filename
+        
+        try:
+            # Clean the transcription text
+            cleaned_transcription = self.clean_text_for_txt(transcription)
+            
+            # Create header with metadata
+            header = f"Transcription: {os.path.basename(image_path)}\n"
+            header += f"Generated by {self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}\n"
+            header += f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            header += "-" * 50 + "\n\n"
+            
+            # Write the TXT file
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(header)
+                f.write(cleaned_transcription)
+            
+            self.logger.info(f"Created TXT: {os.path.basename(txt_path)}")
+            return str(txt_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating TXT for {os.path.basename(image_path)}: {e}")
+            # Fallback: create a simple TXT with error message
+            try:
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"Error creating TXT for {os.path.basename(image_path)}\n")
+                    f.write(f"Error: {str(e)}\n")
+                return str(txt_path)
+            except:
+                raise
+
+    def clean_text_for_txt(self, text: str) -> str:
+        """
+        Clean text for TXT output.
+        
+        Args:
+            text: Raw text from AI transcription
+            
+        Returns:
+            Cleaned text safe for TXT files
+        """
+        if not text:
+            return text
+        
+        # For TXT files, we can be more permissive with characters
+        # Just ensure proper line endings and remove any null characters
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace('\x00', '')
+        
+        return text
+
+    def clean_text_for_csv(self, text: str) -> str:
+        """
+        Clean text for CSV output.
+        
+        Args:
+            text: Raw text from AI transcription
+            
+        Returns:
+            Cleaned text safe for CSV files
+        """
+        if not text:
+            return text
+        
+        # Step 1: Normalize Unicode characters
+        text = unicodedata.normalize('NFD', text)
+        text = unicodedata.normalize('NFC', text)
+        
+        # Step 2: Replace common problematic Unicode characters with ASCII equivalents
+        unicode_replacements = {
+            '\u2018': "'",  # Left single quotation mark
+            '\u2019': "'",  # Right single quotation mark (apostrophe)
+            '\u201C': '"',  # Left double quotation mark
+            '\u201D': '"',  # Right double quotation mark
+            '\u2013': '-',  # En dash
+            '\u2014': '--', # Em dash
+            '\u2026': '...', # Horizontal ellipsis
+            '\u00A0': ' ',  # Non-breaking space
+            '\u2248': '~',  # Almost equal to (≈)
+            '\u00F8': 'o',  # Latin small letter o with stroke (ø)
+            '\u00D8': 'O',  # Latin capital letter O with stroke (Ø)
+            '\u00E6': 'ae', # Latin small letter ae (æ)
+            '\u00C6': 'AE', # Latin capital letter AE (Æ)
+            '\u00F0': 'd',  # Latin small letter eth (ð)
+            '\u00D0': 'D',  # Latin capital letter ETH (Ð)
+            '\u00FE': 'th', # Latin small letter thorn (þ)
+            '\u00DE': 'TH', # Latin capital letter THORN (Þ)
+        }
+        
+        for unicode_char, replacement in unicode_replacements.items():
+            text = text.replace(unicode_char, replacement)
+        
+        # Step 3: Remove or replace characters that can't be encoded in common encodings
+        cleaned_chars = []
+        for char in text:
+            # Get Unicode category
+            category = unicodedata.category(char)
+            
+            # Keep most printable characters
+            if category.startswith('L'):  # Letters
+                # Try to encode the character
+                try:
+                    char.encode('utf-8')
+                    cleaned_chars.append(char)
+                except UnicodeEncodeError:
+                    # Skip problematic characters
+                    continue
+            elif category.startswith('N'):  # Numbers
+                cleaned_chars.append(char)
+            elif category.startswith('P'):  # Punctuation
+                cleaned_chars.append(char)
+            elif category.startswith('S') and char in '°±×÷§¶†‡•‰‱′″‴‵‶‷‸‹›«»':  # Some safe symbols
+                cleaned_chars.append(char)
+            elif category == 'Zs':  # Space separators
+                cleaned_chars.append(' ')  # Normalize all space separators to regular space
+            elif char in '\t':  # Tab
+                cleaned_chars.append(' ')  # Convert tab to space
+            elif char in '\n\r':  # Line breaks
+                cleaned_chars.append(' ')  # Convert line breaks to spaces for CSV
+            elif category.startswith('M'):  # Marks (combining characters)
+                # Skip combining characters that might cause issues
+                continue
+            elif category.startswith('C'):  # Control characters
+                # Skip most control characters
+                continue
+            else:
+                # For any other character, try to keep safe ones
+                if ord(char) < 32:  # Control characters
+                    continue
+                elif ord(char) > 127:  # Non-ASCII characters
+                    # Try to find ASCII equivalent or skip
+                    try:
+                        # Attempt to get ASCII equivalent
+                        ascii_equivalent = unicodedata.normalize('NFKD', char).encode('ascii', 'ignore').decode('ascii')
+                        if ascii_equivalent:
+                            cleaned_chars.append(ascii_equivalent)
+                    except:
+                        continue
+                else:
+                    cleaned_chars.append(char)
+        
+        text = ''.join(cleaned_chars)
+        
+        # Step 4: Clean up whitespace and ensure proper CSV formatting
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        # Step 5: Handle CSV-specific escaping
+        # If text contains commas, quotes, or newlines, it will be properly escaped by the CSV writer
+        # But we want to ensure no null characters remain
+        text = text.replace('\x00', '')
+        
+        return text
+
+    def create_csv_file(self, results: List[Dict], source_directory: str) -> str:
+        """
+        Create a CSV file with all transcription results.
+        
+        Args:
+            results: List of result dictionaries from processing
+            source_directory: Directory where the CSV should be saved
+            
+        Returns:
+            Path to the created CSV file
+        """
+        csv_path = Path(source_directory) / "transcribed_images.csv"
+        
+        try:
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['filename', 'transcription', 'model', 'date']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                # Write header
+                writer.writeheader()
+                
+                # Write data for each result
+                current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                model_name = f"{self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}"
+                
+                for result in results:
+                    # Clean transcription for CSV
+                    cleaned_transcription = self.clean_text_for_csv(result['transcription'])
+                    
+                    writer.writerow({
+                        'filename': result['filename'],
+                        'transcription': cleaned_transcription,
+                        'model': model_name,
+                        'date': current_date
+                    })
+            
+            self.logger.info(f"Created CSV: {os.path.basename(csv_path)}")
+            return str(csv_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating CSV file: {e}")
+            # Fallback: create a simple CSV with error message
+            try:
+                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    fieldnames = ['filename', 'transcription', 'model', 'date']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerow({
+                        'filename': 'ERROR',
+                        'transcription': f'Error creating CSV file: {str(e)}',
+                        'model': 'ERROR',
+                        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    })
+                return str(csv_path)
+            except:
+                raise
 
     def _process_single_file(self, file_path, page_number):
         """Processes a single file and updates progress."""
@@ -814,18 +1067,30 @@ class FileProcessor:
             transcription = self.ocr_processor.transcribe_image(file_path)
             self.logger.info(f"Transcription completed for {filename}")
 
-            # Create individual PDF for this image in the source directory
-            pdf_filename = f"{Path(file_path).stem}.pdf"
-            self.logger.info(f"Creating PDF for {filename}")
-            pdf_path = self.ocr_processor.create_individual_pdf(file_path, transcription, pdf_filename)
-            self.logger.info(f"PDF created: {pdf_filename}")
+            output_path = None
+            if self.output_format.upper() == "PDF":
+                # Create individual PDF for this image in the source directory
+                pdf_filename = f"{Path(file_path).stem}.pdf"
+                self.logger.info(f"Creating PDF for {filename}")
+                output_path = self.ocr_processor.create_individual_pdf(file_path, transcription, pdf_filename)
+                self.logger.info(f"PDF created: {pdf_filename}")
+            elif self.output_format.upper() == "TXT":
+                # Create individual TXT file for this image in the source directory
+                txt_filename = f"{Path(file_path).stem}.txt"
+                self.logger.info(f"Creating TXT for {filename}")
+                output_path = self.create_individual_txt(file_path, transcription, txt_filename)
+                self.logger.info(f"TXT created: {txt_filename}")
+            elif self.output_format.upper() == "CSV":
+                # For CSV, we don't create individual files - the CSV will be created at the end
+                self.logger.info(f"Collected transcription for CSV: {filename}")
+                output_path = None  # No individual file for CSV format
 
             self.processed_count += 1
             self.progress_callback("complete", self.processed_count, filename)
 
             return {
                 "image_path": file_path, "filename": filename, "transcription": transcription,
-                "pdf_path": pdf_path, "page_number": page_number, "status": "success"
+                "output_path": output_path, "page_number": page_number, "status": "success"
             }
 
         except Exception as e:
@@ -835,7 +1100,7 @@ class FileProcessor:
 
             return {
                 "image_path": file_path, "filename": filename, "transcription": f"[Error: {str(e)}]",
-                "pdf_path": None, "page_number": page_number, "status": "error", "error": str(e)
+                "output_path": None, "page_number": page_number, "status": "error", "error": str(e)
             }
 
     def run(self):
@@ -871,7 +1136,23 @@ class FileProcessor:
                 # Sort results by page number to maintain order
                 results = sorted(completed_results, key=lambda x: x["page_number"])
 
-        pdf_paths = [r["pdf_path"] for r in results if r and r.get("pdf_path")]
+        pdf_paths = [r["output_path"] for r in results if r and r.get("output_path")]
+        
+        # If output format is CSV, create the CSV file now
+        if self.output_format.upper() == "CSV" and results:
+            try:
+                # Determine source directory from the first file
+                if self.file_paths:
+                    source_directory = os.path.dirname(self.file_paths[0])
+                    csv_path = self.create_csv_file(results, source_directory)
+                    # For CSV, return the CSV file path as the single output
+                    pdf_paths = [csv_path]
+                    self.logger.info(f"CSV file created: {csv_path}")
+                else:
+                    self.logger.warning("No source directory found for CSV file")
+            except Exception as e:
+                self.logger.error(f"Error creating CSV file: {e}")
+        
         return results, pdf_paths
 
 
@@ -891,14 +1172,14 @@ class OCRApp:
         
         # Initialize OCR processor (will be created when provider and API key are set)
         self.ocr_processor = None
-        self.selected_provider = "openai"  # Default provider
+        self.selected_provider = "openrouter"  # Default provider
         self.provider_configs = {
             "openai": {"api_key": "", "primary": {}, "fallback": {}},
             "anthropic": {"api_key": "", "primary": {}, "fallback": {}},
             "openrouter": {"api_key": "", "primary": {}, "fallback": {}},
             "google": {"api_key": "", "primary": {}, "fallback": {}}
         }
-        self.general_settings = {"max_workers": 1}  # Default general settings
+        self.general_settings = {"max_workers": 1, "output_format": "PDF"}  # Default general settings
         
         # Initialize default configs for all providers
         self._initialize_default_configs()
@@ -913,7 +1194,7 @@ class OCRApp:
         # Update GUI after loading settings
         self.update_gui_after_loading()
         
-                # Center window
+        # Center window
         self.center_window()
     
     def _initialize_default_configs(self):
@@ -1269,25 +1550,32 @@ class OCRApp:
 
     def _create_api_section(self, parent):
         """Create the provider selection section."""
-        provider_outer_frame, provider_inner_frame = self._create_section(parent, "AI Provider Configuration")
+        provider_outer_frame, provider_inner_frame = self._create_section(parent, "Transcription Configuration")
         provider_outer_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Create a grid layout for better spacing
+        # Create a grid layout for side-by-side dropdowns
         provider_inner_frame.grid_columnconfigure(1, weight=1)
-        provider_inner_frame.grid_columnconfigure(2, weight=2)
+        provider_inner_frame.grid_columnconfigure(3, weight=1)
         
+        # Provider selection (left side)
         tk.Label(provider_inner_frame, text="Provider:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=5)
         
         self.provider_var = tk.StringVar(value=self.selected_provider)
         provider_combo = ttk.Combobox(provider_inner_frame, textvariable=self.provider_var, 
-                                    values=["OpenAI", "Anthropic", "OpenRouter", "Google"], 
-                                    state="readonly", width=25, font=("Arial", 14, "bold"))
-        provider_combo.grid(row=0, column=1, sticky="ew", padx=(0, 15), pady=5)
+                                    values=["OpenRouter", "Anthropic", "Google", "OpenAI"], 
+                                    state="readonly", width=20, font=("Arial", 14, "bold"))
+        provider_combo.grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=5)
         provider_combo.bind("<<ComboboxSelected>>", self.on_provider_changed)
         
-        # Status label
-        self.provider_status_label = tk.Label(provider_inner_frame, text="", bg="#212121", fg="#ffffff", font=("Arial", 12))
-        self.provider_status_label.grid(row=0, column=2, sticky="w", pady=5)
+        # Output format selection (right side)
+        tk.Label(provider_inner_frame, text="Output Format:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 10), pady=5)
+        
+        self.output_format_var = tk.StringVar(value="PDF")
+        format_combo = ttk.Combobox(provider_inner_frame, textvariable=self.output_format_var, 
+                                  values=["PDF", "TXT", "CSV"], 
+                                  state="readonly", width=15, font=("Arial", 14, "bold"))
+        format_combo.grid(row=0, column=3, sticky="ew", padx=(0, 0), pady=5)
+        format_combo.bind("<<ComboboxSelected>>", self.on_output_format_changed)
 
     def _create_settings_button_section(self, parent):
         """Create the 'Edit Settings' button."""
@@ -1343,7 +1631,7 @@ class OCRApp:
 
     def _create_status_bar(self, parent):
         """Create the status bar at the bottom."""
-        self.status_var = tk.StringVar(value=f"Ready - Configure AI provider in Settings | v{VERSION}")
+        self.status_var = tk.StringVar(value=f"Ready - Configure API key in Settings | v{VERSION}")
         status_bar = ttk.Entry(parent, textvariable=self.status_var, state="readonly")
         status_bar.pack(fill=tk.X, pady=(5, 0))
 
@@ -1426,13 +1714,19 @@ class OCRApp:
         # Convert display name to internal name
         display_to_internal = {"OpenAI": "openai", "Anthropic": "anthropic", "OpenRouter": "openrouter", "Google": "google"}
         self.selected_provider = display_to_internal.get(self.provider_var.get(), self.provider_var.get().lower())
-        self.update_provider_status()
         self.try_create_ocr_processor()
+        self.update_provider_status()
         self.update_process_button()
         self.save_settings()
     
+    def on_output_format_changed(self, event=None):
+        """Handle output format selection change."""
+        self.general_settings["output_format"] = self.output_format_var.get()
+        self.save_settings()
+        self.status_var.set(f"Output format changed to {self.output_format_var.get()} | v{VERSION}")
+    
     def update_provider_status(self):
-        """Update the provider status display."""
+        """Update the provider status display in the status bar."""
         provider_config = self.provider_configs.get(self.selected_provider, {})
         api_key = provider_config.get("api_key", "")
         
@@ -1440,10 +1734,14 @@ class OCRApp:
         provider_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
         display_name = provider_names.get(self.selected_provider, self.selected_provider.title())
         
+        # Update status bar with API key status
         if api_key:
-            self.provider_status_label.config(text=f"✓ {display_name} API key configured", fg="#00ff00")
+            if self.ocr_processor:
+                self.status_var.set(f"{display_name} provider ready - Ready to process files | v{VERSION}")
+            else:
+                self.status_var.set(f"Ready - Configure {display_name} API key in Settings | v{VERSION}")
         else:
-            self.provider_status_label.config(text=f"⚠ No {display_name} API key set - Configure in Settings", fg="#ffaa00")
+            self.status_var.set(f"Ready - Configure {display_name} API key in Settings | v{VERSION}")
     
     def try_create_ocr_processor(self):
         """Try to create OCR processor with current provider and API key."""
@@ -1465,11 +1763,13 @@ class OCRApp:
                     "fallback": provider_config["fallback"].copy()
                 }
             
-            self.status_var.set(f"{self.selected_provider.title()} provider ready - Ready to process files | v{VERSION}")
             return True
         except Exception as e:
             self.ocr_processor = None
-            self.status_var.set(f"Error with {self.selected_provider.title()} provider: {str(e)} | v{VERSION}")
+            # Display error in status bar
+            provider_names = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
+            display_name = provider_names.get(self.selected_provider, self.selected_provider.title())
+            self.status_var.set(f"Error with {display_name} provider: {str(e)} | v{VERSION}")
             return False
             
     def open_settings(self):
@@ -1482,12 +1782,11 @@ class OCRApp:
             self.general_settings = dialog.result["general_settings"]
             
             # Update provider status and try to recreate OCR processor
-            self.update_provider_status()
             self.try_create_ocr_processor()
+            self.update_provider_status()
             self.update_process_button()
             
             self.save_settings()
-            self.status_var.set(f"Settings updated | v{VERSION}")
             
     def process_files(self):
         """Process the selected files."""
@@ -1536,7 +1835,8 @@ class OCRApp:
         def process_thread():
             """The thread that runs the file processing."""
             max_workers = self.general_settings.get("max_workers", 1)
-            processor = FileProcessor(self.ocr_processor, self.file_paths, max_workers, self.logger, progress_callback)
+            output_format = self.general_settings.get("output_format", "PDF")
+            processor = FileProcessor(self.ocr_processor, self.file_paths, max_workers, self.logger, progress_callback, output_format)
             
             # This makes the processor aware of the dialog's cancellation state
             def check_cancellation():
@@ -1582,19 +1882,24 @@ class OCRApp:
 
         threading.Thread(target=process_thread, daemon=True).start()
         
-    def show_results(self, results, pdf_paths):
+    def show_results(self, results, output_paths):
         """Show processing results."""
         if results:
             successful_results = [r for r in results if r["status"] == "success"]
             failed_results = [r for r in results if r["status"] == "error"]
+            
+            output_format = self.general_settings.get("output_format", "PDF")
             
             message = f"Processing completed!\n\n"
             message += f"Successfully processed: {len(successful_results)} files\n"
             if failed_results:
                 message += f"Failed to process: {len(failed_results)} files\n"
             
-            if pdf_paths:
-                message += f"\nPDFs saved to: {os.path.dirname(pdf_paths[0])}"
+            if output_paths:
+                if output_format == "CSV":
+                    message += f"\nCSV file saved to: {output_paths[0]}"
+                else:
+                    message += f"\n{output_format} files saved to: {os.path.dirname(output_paths[0])}"
                 message += f"\n\nWould you like to open the output folder?"
                 
                 # Ask if user wants to open the output folder
@@ -1602,7 +1907,7 @@ class OCRApp:
                     import subprocess
                     import platform
                     
-                    folder_path = os.path.dirname(pdf_paths[0])
+                    folder_path = os.path.dirname(output_paths[0])
                     if platform.system() == "Darwin":  # macOS
                         subprocess.run(["open", folder_path])
                     elif platform.system() == "Windows":
@@ -1610,7 +1915,7 @@ class OCRApp:
                     else:  # Linux
                         subprocess.run(["xdg-open", folder_path])
             else:
-                message += f"\n\nNo PDFs were created due to processing errors."
+                message += f"\n\nNo {output_format} files were created due to processing errors."
                 messagebox.showinfo("Processing Complete", message, parent=self.root)
             
             self.status_var.set(f"Processing complete - {len(successful_results)} successful, {len(failed_results)} failed")
@@ -1625,18 +1930,15 @@ class OCRApp:
             internal_to_display = {"openai": "OpenAI", "anthropic": "Anthropic", "openrouter": "OpenRouter", "google": "Google"}
             display_name = internal_to_display.get(self.selected_provider, self.selected_provider.title())
             self.provider_var.set(display_name)
+        
+        # Update the output format selection
+        if hasattr(self, 'output_format_var'):
+            output_format = self.general_settings.get("output_format", "PDF")
+            self.output_format_var.set(output_format)
             
         # Update provider status and try to create OCR processor
-        if hasattr(self, 'provider_status_label'):
-            self.update_provider_status()
-            self.try_create_ocr_processor()
-            
-        # Update status based on whether we have a valid OCR processor
-        if hasattr(self, 'status_var'):
-            if self.ocr_processor:
-                self.status_var.set(f"{self.selected_provider.title()} provider ready - Ready to process files | v{VERSION}")
-            else:
-                self.status_var.set(f"Ready - Configure API key in Settings | v{VERSION}")
+        self.try_create_ocr_processor()
+        self.update_provider_status()
                 
         # Update process button state
         self.update_process_button()
@@ -1657,10 +1959,10 @@ class OCRApp:
                     })
                     
                     # Load selected provider
-                    self.selected_provider = settings.get("selected_provider", "openai")
+                    self.selected_provider = settings.get("selected_provider", "openrouter")
                     
                     # Load general settings
-                    self.general_settings = settings.get("general_settings", {"max_workers": 1})
+                    self.general_settings = settings.get("general_settings", {"max_workers": 1, "output_format": "PDF"})
                     
                     # Ensure all providers have default configs if missing
                     for provider in ["openai", "anthropic", "openrouter", "google"]:
