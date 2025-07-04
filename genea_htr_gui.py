@@ -40,12 +40,14 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 import unicodedata
+from PIL import Image
+from datetime import datetime
 
 # Import the existing OCR functionality
 from genea_htr import HandwritingOCR
 
 # Application version
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 
 
 class BaseDialog(tk.Toplevel):
@@ -205,6 +207,165 @@ class LogViewerDialog(BaseDialog):
         super().cancel()
 
 
+class OutputLocationDialog(BaseDialog):
+    """Dialog for selecting output location preferences."""
+    
+    def __init__(self, parent, general_settings: Dict):
+        super().__init__(parent, "Choose Output Location", min_width=650, min_height=480)
+        
+        self.general_settings = general_settings.copy()
+        self.output_mode = self.general_settings.get("output_mode", "source")  # "source" or "custom"
+        self.custom_output_path = self.general_settings.get("custom_output_path", "")
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        """Create the output location selection interface."""
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="Choose Output Location", font=("Arial", 16, "bold"))
+        title_label.pack(pady=(0, 30))
+        
+        # Radio button options
+        self.output_mode_var = tk.StringVar(value=self.output_mode)
+        
+        # Source folder option
+        source_frame = tk.Frame(main_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
+        source_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        source_radio_frame = tk.Frame(source_frame, bg="#212121")
+        source_radio_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        source_radio = ttk.Radiobutton(source_radio_frame, text="Save to source folder", 
+                                     variable=self.output_mode_var, value="source",
+                                     command=self.on_mode_changed, style='TRadiobutton')
+        source_radio.pack(anchor="w")
+        
+        source_desc = tk.Label(source_frame, 
+                              text="Files will be saved in subfolders (PDF, TXT) within the same directory as the source images.",
+                              font=("Arial", 16), foreground="#ffffff", bg="#212121", justify="left", wraplength=580)
+        source_desc.pack(anchor="w", padx=30, pady=(5, 15))
+        
+        # Custom location option
+        custom_frame = tk.Frame(main_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
+        custom_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        custom_radio_frame = tk.Frame(custom_frame, bg="#212121")
+        custom_radio_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        custom_radio = ttk.Radiobutton(custom_radio_frame, text="Save to custom location", 
+                                     variable=self.output_mode_var, value="custom",
+                                     command=self.on_mode_changed, style='TRadiobutton')
+        custom_radio.pack(anchor="w")
+        
+        # Custom path selection
+        path_frame = tk.Frame(custom_frame, bg="#212121")
+        path_frame.pack(fill=tk.X, padx=30, pady=(0, 10))
+        
+        path_label = tk.Label(path_frame, text="Output Directory:", font=("Arial", 14, "bold"), 
+                             bg="#212121", fg="#ffffff")
+        path_label.pack(anchor="w", pady=(0, 5))
+        
+        path_entry_frame = tk.Frame(path_frame, bg="#212121")
+        path_entry_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.path_var = tk.StringVar(value=self.custom_output_path)
+        self.path_entry = ttk.Entry(path_entry_frame, textvariable=self.path_var, 
+                                  state="readonly", font=("Arial", 16))
+        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        
+        self.browse_button = ttk.Button(path_entry_frame, text="Browse...", 
+                                      command=self.browse_output_directory, style='Rounded.TButton')
+        self.browse_button.pack(side=tk.RIGHT)
+        
+        custom_desc = tk.Label(custom_frame, 
+                              text="Files will be saved in subfolders (PDF, TXT) within the selected directory.",
+                              font=("Arial", 16), foreground="#ffffff", bg="#212121", justify="left", wraplength=580)
+        custom_desc.pack(anchor="w", padx=30, pady=(5, 15))
+        
+        # Current selection display
+        self.status_label = ttk.Label(main_frame, text="", font=("Arial", 16, "bold"))
+        self.status_label.pack(pady=(0, 0))
+        
+        # Update initial state
+        self.on_mode_changed()
+        
+        # Buttons frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        ttk.Button(button_frame, text="Save", command=self.save_settings, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text="Cancel", command=self.cancel, style='Rounded.TButton').pack(side=tk.RIGHT)
+        
+    def on_mode_changed(self):
+        """Handle changes to the output mode selection."""
+        mode = self.output_mode_var.get()
+        
+        # Enable/disable custom path controls
+        if mode == "custom":
+            self.path_entry.config(state="normal")
+            self.browse_button.config(state="normal")
+        else:
+            self.path_entry.config(state="readonly")
+            self.browse_button.config(state="disabled")
+        
+        # Update status display
+        self.update_status_display()
+        
+    def browse_output_directory(self):
+        """Open directory browser for custom output location."""
+        directory = filedialog.askdirectory(
+            title="Select Output Directory",
+            initialdir=self.path_var.get() if self.path_var.get() else os.path.expanduser("~")
+        )
+        if directory:
+            self.path_var.set(directory)
+            self.update_status_display()
+    
+    def update_status_display(self):
+        """Update the status display showing current selection."""
+        mode = self.output_mode_var.get()
+        
+        if mode == "source":
+            self.status_label.config(text="✓ Files will be saved to source folder", foreground="#4CAF50")
+        elif mode == "custom":
+            custom_path = self.path_var.get()
+            if custom_path:
+                self.status_label.config(text=f"✓ Files will be saved to: {custom_path}", foreground="#4CAF50")
+            else:
+                self.status_label.config(text="⚠ Please select a custom output directory", foreground="#FF9800")
+        
+    def save_settings(self):
+        """Save the output location settings."""
+        mode = self.output_mode_var.get()
+        
+        # Validate custom path if selected
+        if mode == "custom":
+            custom_path = self.path_var.get().strip()
+            if not custom_path:
+                messagebox.showerror("Invalid Path", "Please select a custom output directory.", parent=self)
+                return
+            
+            # Check if directory exists or can be created
+            try:
+                os.makedirs(custom_path, exist_ok=True)
+                if not os.path.exists(custom_path):
+                    messagebox.showerror("Invalid Path", f"Cannot access or create directory: {custom_path}", parent=self)
+                    return
+            except Exception as e:
+                messagebox.showerror("Invalid Path", f"Error accessing directory: {str(e)}", parent=self)
+                return
+        
+        # Save settings
+        self.general_settings["output_mode"] = mode
+        self.general_settings["custom_output_path"] = self.path_var.get().strip()
+        
+        self.result = self.general_settings
+        self.cancel()
+
+
 def get_resource_path(relative_path):
     """Get the absolute path to a resource, works for dev and for PyInstaller."""
     try:
@@ -274,7 +435,7 @@ class SettingsDialog(BaseDialog):
     """Dialog for editing settings."""
     
     def __init__(self, parent, provider_configs: Dict, general_settings: Dict = None):
-        super().__init__(parent, "Edit Settings", min_width=900, min_height=700)
+        super().__init__(parent, "API Settings", min_width=900, min_height=700)
 
         self.provider_configs = provider_configs.copy()  # Work with a copy
         self.general_settings = general_settings.copy() if general_settings else {"max_workers": 1}
@@ -518,65 +679,30 @@ class SettingsDialog(BaseDialog):
         proc_inner = tk.Frame(proc_frame, bg="#212121")
         proc_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        # Concurrent threads setting
-        tk.Label(proc_inner, text="Concurrent Threads:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=0, column=0, sticky="w", padx=(0, 10))
-        
-        self.threads_var = tk.IntVar(value=self.general_settings.get("max_workers", 1))
-        threads_spinbox = ttk.Spinbox(proc_inner, from_=1, to=10, width=10, textvariable=self.threads_var)
-        threads_spinbox.grid(row=0, column=1, sticky="w")
-        
         # Output format setting
-        tk.Label(proc_inner, text="Default Output Format:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
+        tk.Label(proc_inner, text="Default Output Format:", bg="#212121", fg="#ffffff", font=("Arial", 14)).grid(row=0, column=0, sticky="w", padx=(0, 10))
         
-        self.settings_output_format_var = tk.StringVar(value=self.general_settings.get("output_format", "PDF"))
-        format_spinbox = ttk.Combobox(proc_inner, textvariable=self.settings_output_format_var, values=["PDF", "TXT", "CSV"], 
-                                     state="readonly", width=8)
-        format_spinbox.grid(row=1, column=1, sticky="w", pady=(10, 0))
-        
-        # Help text for threads
-        help_text = tk.Label(proc_inner, 
-                           text="Number of concurrent threads for processing files.\n"
-                                "Higher values may speed up processing but could hit API rate limits.\n"
-                                "Recommended: 1-3 threads for most use cases.",
-                           font=("Arial", 14),
-                           fg="#ffffff",
-                           bg="#212121",
-                           justify="left")
-        help_text.grid(row=2, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        self.settings_output_format_var = tk.StringVar(value=self.general_settings.get("output_format", "PDF with images"))
+        format_spinbox = ttk.Combobox(proc_inner, textvariable=self.settings_output_format_var, values=["PDF with images", "PDF with images (merged)", "PDF", "PDF (merged)", "TXT", "CSV"], 
+                                     state="readonly", width=15)
+        format_spinbox.grid(row=0, column=1, sticky="w")
         
         # Help text for output format
         format_help_text = tk.Label(proc_inner, 
                                    text="Default output format when opening the application.\n"
-                                        "PDF: Individual searchable PDFs with images\n"
+                                        "PDF with images: Individual searchable PDFs with source images\n"
+                                        "PDF: Individual searchable PDFs (text only)\n"
+                                        "PDF with images (merged): Single merged PDF with source images\n"
+                                        "PDF (merged): Single merged PDF (text only)\n"
                                         "TXT: Individual text files with transcriptions\n"
                                         "CSV: Single CSV file with all transcriptions",
                                    font=("Arial", 14),
                                    fg="#ffffff",
                                    bg="#212121",
                                    justify="left")
-        format_help_text.grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        format_help_text.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
         
-        # Performance note - use manual dark frame styling
-        perf_frame = tk.Frame(settings_frame, bg="#212121", bd=1, relief="solid", highlightbackground="#555555")
-        perf_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        # Manual label for performance frame
-        perf_label = tk.Label(perf_frame, text="Performance Notes", 
-                            bg="#212121", fg="#ffffff", font=("Arial", 14, "bold"))
-        perf_label.pack(anchor="nw", padx=10, pady=(5, 0))
-        
-        perf_inner = tk.Frame(perf_frame, bg="#212121")
-        perf_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
-        
-        perf_text = tk.Label(perf_inner,
-                           text="• 1 thread: Sequential processing (safest, slowest)\n"
-                                "• 2-3 threads: Good balance of speed and reliability\n"
-                                "• 4+ threads: Faster but may hit OpenAI rate limits\n",
-                           font=("Arial", 14),
-                           justify="left",
-                           bg="#212121",
-                           fg="#ffffff")
-        perf_text.pack(anchor="w")
+
 
     def save_settings(self):
         """Save the current settings."""
@@ -618,7 +744,6 @@ class SettingsDialog(BaseDialog):
                             return
             
             # Update general settings
-            self.general_settings["max_workers"] = self.threads_var.get()
             self.general_settings["output_format"] = self.settings_output_format_var.get()
             
             self.result = {"provider_configs": self.provider_configs, "general_settings": self.general_settings}
@@ -809,19 +934,166 @@ class OCRProgressDialog(BaseDialog):
 class FileProcessor:
     """Handles the backend file processing logic."""
 
-    def __init__(self, ocr_processor, file_paths, max_workers, logger, progress_callback, output_format="PDF"):
+    def __init__(self, ocr_processor, file_paths, max_workers, logger, progress_callback, output_format="PDF with images", output_mode="source", custom_output_path=""):
         self.ocr_processor = ocr_processor
         self.file_paths = file_paths
         self.max_workers = max_workers
         self.logger = logger
         self.progress_callback = progress_callback
         self.output_format = output_format
+        self.output_mode = output_mode
+        self.custom_output_path = custom_output_path
         self.cancelled = False
         self.processed_count = 0
+        
+        # Determine if images should be included based on output format
+        self.include_images = "with images" in output_format
+        
+        # Determine if we're creating merged PDFs
+        self.is_merged_pdf = "merged" in output_format.lower()
 
     def cancel(self):
         """Cancel the processing task."""
         self.cancelled = True
+
+    def create_individual_pdf(self, image_path: str, transcription: str, output_filename: str) -> str:
+        """
+        Create a searchable PDF for a single image with custom output path support.
+        
+        Args:
+            image_path: Path to the image file
+            transcription: Transcribed text
+            output_filename: Output PDF filename
+            
+        Returns:
+            Path to the created PDF file
+        """
+        # For custom output, we need to temporarily modify the OCR processor behavior
+        if self.output_mode == "custom" and self.custom_output_path:
+            # Create a modified version that uses custom path
+            return self._create_pdf_with_custom_path(image_path, transcription, output_filename)
+        else:
+            # Use the original OCR processor method for source directory
+            return self.ocr_processor.create_individual_pdf(image_path, transcription, output_filename)
+    
+    def _create_pdf_with_custom_path(self, image_path: str, transcription: str, output_filename: str) -> str:
+        """Create PDF with custom output path by copying the OCR processor logic."""
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        
+        # Create PDF folder in custom location
+        pdf_dir = Path(self.custom_output_path) / "PDF"
+        pdf_dir.mkdir(exist_ok=True)
+        pdf_path = pdf_dir / output_filename
+        
+        try:
+            # Get image dimensions for later use
+            with Image.open(image_path) as img:
+                img_width_px, img_height_px = img.size
+                
+                # Convert pixels to points at 300 DPI (1 inch = 72 points, 300 pixels = 1 inch)
+                points_per_pixel = 72.0 / 300.0
+                img_width_pts = img_width_px * points_per_pixel
+                img_height_pts = img_height_px * points_per_pixel
+                
+                # Start PDF with standard letter size for transcription
+                c = canvas.Canvas(str(pdf_path), pagesize=letter)
+                
+                # Clean the transcription text to prevent black squares in PDF
+                cleaned_transcription = self.ocr_processor.clean_text_for_pdf(transcription)
+                
+                # Page 1 (and potentially more): Transcription pages
+                c.setFont("Helvetica-Bold", 14)
+                margin = 72  # 1 inch margins
+                c.drawString(margin, letter[1] - margin - 20, f"Transcription: {os.path.basename(image_path)}")
+                
+                # Calculate available space for text (leave room for footer)
+                footer_height = 80  # Space reserved for footer
+                c.setFont("Helvetica", 11)
+                y_position = letter[1] - margin - 60
+                line_height = 14
+                
+                # Split transcription into lines and handle line breaks
+                lines = cleaned_transcription.split('\n')
+                for line in lines:
+                    # Check if we have space for this line
+                    if y_position - line_height < footer_height + 20:  # 20 points buffer above footer
+                        # Start a new page if we're running out of space
+                        c.showPage()
+                        c.setPageSize(letter)
+                        c.setFont("Helvetica", 11)
+                        y_position = letter[1] - margin - 20  # Start closer to top on continuation pages
+                    
+                    # Handle long lines by wrapping them
+                    if len(line) > 80:  # Approximate character limit per line
+                        words = line.split(' ')
+                        current_line = ""
+                        for word in words:
+                            if len(current_line + word) < 80:
+                                current_line += word + " "
+                            else:
+                                if current_line:
+                                    # Check space before drawing
+                                    if y_position - line_height < footer_height + 20:
+                                        c.showPage()
+                                        c.setPageSize(letter)
+                                        c.setFont("Helvetica", 11)
+                                        y_position = letter[1] - margin - 20
+                                    
+                                    c.drawString(margin, y_position, current_line.strip())
+                                    y_position -= line_height
+                                current_line = word + " "
+                        if current_line:
+                            if y_position - line_height < footer_height + 20:
+                                c.showPage()
+                                c.setPageSize(letter)
+                                c.setFont("Helvetica", 11)
+                                y_position = letter[1] - margin - 20
+                            
+                            c.drawString(margin, y_position, current_line.strip())
+                            y_position -= line_height
+                    else:
+                        c.drawString(margin, y_position, line)
+                        y_position -= line_height
+                
+                # Add footer at bottom of current transcription page
+                c.setFont("Helvetica", 9)
+                c.setFillGray(0.5)
+                current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                provider_info = f"{self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}"
+                footer_text = f"Generated by {provider_info} on {current_date}"
+                footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                
+                # Only include image if include_images is True
+                if self.include_images:
+                    # End transcription page(s) and start new page for image
+                    c.showPage()
+                    
+                    # Last page: Image at full size with no margins
+                    c.setPageSize((img_width_pts, img_height_pts))
+                    c.drawImage(image_path, 0, 0, width=img_width_pts, height=img_height_pts)
+                
+                # Save the PDF
+                c.save()
+                
+                self.logger.info(f"Created PDF: {os.path.basename(pdf_path)}")
+                return str(pdf_path)
+                
+        except Exception as e:
+            self.logger.error(f"Error creating PDF for {os.path.basename(image_path)}: {e}")
+            # Fallback: create a simple PDF with error message
+            try:
+                c = canvas.Canvas(str(pdf_path), pagesize=letter)
+                c.setFont("Helvetica", 12)
+                c.drawString(72, letter[1] - 72, f"Error creating PDF for {os.path.basename(image_path)}")
+                c.drawString(72, letter[1] - 100, f"Error: {str(e)}")
+                c.save()
+                return str(pdf_path)
+            except:
+                raise
 
     def create_individual_txt(self, image_path: str, transcription: str, output_filename: str) -> str:
         """
@@ -835,11 +1107,16 @@ class FileProcessor:
         Returns:
             Path to the created TXT file
         """
-        # Create TXT folder in the same directory as the source image
-        image_dir = Path(image_path).parent
-        txt_dir = image_dir / "TXT"
-        txt_dir.mkdir(exist_ok=True)
+        # Determine output directory based on settings
+        if self.output_mode == "custom" and self.custom_output_path:
+            # Use custom output path
+            txt_dir = Path(self.custom_output_path) / "TXT"
+        else:
+            # Use source directory (default behavior)
+            image_dir = Path(image_path).parent
+            txt_dir = image_dir / "TXT"
         
+        txt_dir.mkdir(exist_ok=True)
         txt_path = txt_dir / output_filename
         
         try:
@@ -1000,12 +1277,18 @@ class FileProcessor:
         
         Args:
             results: List of result dictionaries from processing
-            source_directory: Directory where the CSV should be saved
+            source_directory: Directory where the CSV should be saved (ignored if custom output path is set)
             
         Returns:
             Path to the created CSV file
         """
-        csv_path = Path(source_directory) / "transcribed_images.csv"
+        # Determine output directory based on settings
+        if self.output_mode == "custom" and self.custom_output_path:
+            # Use custom output path
+            csv_path = Path(self.custom_output_path) / "transcribed_images.csv"
+        else:
+            # Use source directory (default behavior)
+            csv_path = Path(source_directory) / "transcribed_images.csv"
         
         try:
             with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
@@ -1051,6 +1334,187 @@ class FileProcessor:
             except:
                 raise
 
+    def create_merged_pdf(self, results: List[Dict], source_directory: str) -> str:
+        """
+        Create a merged PDF file with all transcription results.
+        
+        Args:
+            results: List of result dictionaries from processing
+            source_directory: Directory where the merged PDF should be saved (ignored if custom output path is set)
+            
+        Returns:
+            Path to the created merged PDF file
+        """
+        # Determine output directory based on settings
+        if self.output_mode == "custom" and self.custom_output_path:
+            # Use custom output path
+            merged_pdf_path = Path(self.custom_output_path) / "transcribed_images.pdf"
+        else:
+            # Use source directory (default behavior)
+            merged_pdf_path = Path(source_directory) / "transcribed_images.pdf"
+        
+        try:
+            # Use canvas for streaming approach - more memory efficient
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import letter
+            from PIL import Image
+            
+            c = canvas.Canvas(str(merged_pdf_path), pagesize=letter)
+            
+            # Process each result
+            successful_results = [r for r in results if r["status"] == "success"]
+            
+            for i, result in enumerate(successful_results):
+                # Clean the transcription text to prevent black squares in PDF
+                cleaned_transcription = self.clean_text_for_pdf(result['transcription'])
+                
+                # Page setup
+                margin = 72  # 1 inch margins
+                y_position = letter[1] - margin
+                line_height = 14
+                
+                # Title
+                c.setFont("Helvetica-Bold", 16)
+                c.drawString(margin, y_position, f"Document {i+1}: {result['filename']}")
+                y_position -= 30
+                
+                # Transcription header
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(margin, y_position, "Transcription:")
+                y_position -= 20
+                
+                # Transcription text
+                c.setFont("Helvetica", 11)
+                lines = cleaned_transcription.split('\n')
+                
+                for line in lines:
+                    # Check if we need a new page
+                    if y_position < margin + 100:  # Leave space for footer
+                        # Add footer to current page
+                        c.setFont("Helvetica", 9)
+                        c.setFillGray(0.5)
+                        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        provider_info = f"{self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}"
+                        footer_text = f"Generated by {provider_info} on {current_date}"
+                        footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                        c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                        c.setFillGray(0)  # Reset to black
+                        
+                        # Start new page
+                        c.showPage()
+                        y_position = letter[1] - margin
+                        c.setFont("Helvetica", 11)
+                    
+                    # Handle long lines by wrapping
+                    if len(line) > 85:  # Approximate character limit per line
+                        words = line.split(' ')
+                        current_line = ""
+                        for word in words:
+                            if len(current_line + word) < 85:
+                                current_line += word + " "
+                            else:
+                                if current_line:
+                                    c.drawString(margin, y_position, current_line.strip())
+                                    y_position -= line_height
+                                    if y_position < margin + 100:
+                                        # Add footer and start new page
+                                        c.setFont("Helvetica", 9)
+                                        c.setFillGray(0.5)
+                                        footer_text = f"Generated by {provider_info} on {current_date}"
+                                        footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                                        c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                                        c.setFillGray(0)
+                                        c.showPage()
+                                        y_position = letter[1] - margin
+                                        c.setFont("Helvetica", 11)
+                                current_line = word + " "
+                        if current_line:
+                            c.drawString(margin, y_position, current_line.strip())
+                            y_position -= line_height
+                    else:
+                        c.drawString(margin, y_position, line)
+                        y_position -= line_height
+                
+                # Add image if include_images is True - use full page like individual PDFs
+                if self.include_images:
+                    # Add footer to transcription page
+                    c.setFont("Helvetica", 9)
+                    c.setFillGray(0.5)
+                    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    provider_info = f"{self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}"
+                    footer_text = f"Generated by {provider_info} on {current_date}"
+                    footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                    c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                    c.setFillGray(0)  # Reset to black
+                    
+                    try:
+                        # Start new page for image
+                        c.showPage()
+                        
+                        page_width, page_height = letter
+                        
+                        # Draw image, centered, fitting the page while preserving aspect ratio
+                        c.drawImage(result['image_path'], 0, 0, width=page_width, height=page_height, preserveAspectRatio=True, anchor='c')
+                        
+                        # Ensure we're back to letter size for next document
+                        c.setPageSize(letter)
+                                
+                    except Exception as e:
+                        self.logger.warning(f"Could not add image {result['filename']} to merged PDF: {e}")
+                        # If image fails, just add a note on the transcription page
+                        c.setFont("Helvetica", 10)
+                        c.drawString(margin, y_position - 20, f"[Image: {result['filename']} - Could not display]")
+                else:
+                    # Add footer to transcription page when not including images
+                    c.setFont("Helvetica", 9)
+                    c.setFillGray(0.5)
+                    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    provider_info = f"{self.ocr_processor.provider_name.upper()}: {self.ocr_processor.transcription_config['primary']['model']}"
+                    footer_text = f"Generated by {provider_info} on {current_date}"
+                    footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                    c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                    c.setFillGray(0)  # Reset to black
+                
+                # Add page break between documents (except for the last one)
+                # Note: Footer is already added above in the image/no-image handling
+                if i < len(successful_results) - 1:
+                    # Start new page for next document
+                    c.showPage()
+                    c.setPageSize(letter)  # Ensure we're back to letter size
+            
+            # Final footer is already added for each document, no need for additional footer
+            
+            # Save the PDF
+            c.save()
+            
+            self.logger.info(f"Created merged PDF: {os.path.basename(merged_pdf_path)}")
+            return str(merged_pdf_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating merged PDF: {e}")
+            # Fallback: create a simple PDF with error message
+            try:
+                c = canvas.Canvas(str(merged_pdf_path), pagesize=letter)
+                c.setFont("Helvetica", 12)
+                c.drawString(72, letter[1] - 72, f"Error creating merged PDF")
+                c.drawString(72, letter[1] - 100, f"Error: {str(e)}")
+                c.save()
+                return str(merged_pdf_path)
+            except:
+                raise
+    
+    def clean_text_for_pdf(self, text: str) -> str:
+        """
+        Clean text for PDF output - reuse the method from OCR processor.
+        
+        Args:
+            text: Raw text from AI transcription
+            
+        Returns:
+            Cleaned text safe for PDF files
+        """
+        return self.ocr_processor.clean_text_for_pdf(text)
+
     def _process_single_file(self, file_path, page_number):
         """Processes a single file and updates progress."""
         if self.cancelled:
@@ -1068,11 +1532,11 @@ class FileProcessor:
             self.logger.info(f"Transcription completed for {filename}")
 
             output_path = None
-            if self.output_format.upper() == "PDF":
-                # Create individual PDF for this image in the source directory
+            if self.output_format.upper().startswith("PDF") and not self.is_merged_pdf:
+                # Create individual PDF for this image (only if not merged)
                 pdf_filename = f"{Path(file_path).stem}.pdf"
                 self.logger.info(f"Creating PDF for {filename}")
-                output_path = self.ocr_processor.create_individual_pdf(file_path, transcription, pdf_filename)
+                output_path = self.create_individual_pdf(file_path, transcription, pdf_filename)
                 self.logger.info(f"PDF created: {pdf_filename}")
             elif self.output_format.upper() == "TXT":
                 # Create individual TXT file for this image in the source directory
@@ -1080,10 +1544,11 @@ class FileProcessor:
                 self.logger.info(f"Creating TXT for {filename}")
                 output_path = self.create_individual_txt(file_path, transcription, txt_filename)
                 self.logger.info(f"TXT created: {txt_filename}")
-            elif self.output_format.upper() == "CSV":
-                # For CSV, we don't create individual files - the CSV will be created at the end
-                self.logger.info(f"Collected transcription for CSV: {filename}")
-                output_path = None  # No individual file for CSV format
+            elif self.output_format.upper() == "CSV" or self.is_merged_pdf:
+                # For CSV and merged PDF, we don't create individual files - they will be created at the end
+                format_type = "merged PDF" if self.is_merged_pdf else "CSV"
+                self.logger.info(f"Collected transcription for {format_type}: {filename}")
+                output_path = None  # No individual file for these formats
 
             self.processed_count += 1
             self.progress_callback("complete", self.processed_count, filename)
@@ -1138,7 +1603,7 @@ class FileProcessor:
 
         pdf_paths = [r["output_path"] for r in results if r and r.get("output_path")]
         
-        # If output format is CSV, create the CSV file now
+        # Handle special output formats
         if self.output_format.upper() == "CSV" and results:
             try:
                 # Determine source directory from the first file
@@ -1152,6 +1617,19 @@ class FileProcessor:
                     self.logger.warning("No source directory found for CSV file")
             except Exception as e:
                 self.logger.error(f"Error creating CSV file: {e}")
+        elif self.is_merged_pdf and results:
+            try:
+                # Create merged PDF from all results
+                if self.file_paths:
+                    source_directory = os.path.dirname(self.file_paths[0])
+                    merged_pdf_path = self.create_merged_pdf(results, source_directory)
+                    # For merged PDF, return the merged PDF file path as the single output
+                    pdf_paths = [merged_pdf_path]
+                    self.logger.info(f"Merged PDF file created: {merged_pdf_path}")
+                else:
+                    self.logger.warning("No source directory found for merged PDF file")
+            except Exception as e:
+                self.logger.error(f"Error creating merged PDF file: {e}")
         
         return results, pdf_paths
 
@@ -1179,7 +1657,7 @@ class OCRApp:
             "openrouter": {"api_key": "", "primary": {}, "fallback": {}},
             "google": {"api_key": "", "primary": {}, "fallback": {}}
         }
-        self.general_settings = {"max_workers": 1, "output_format": "PDF"}  # Default general settings
+        self.general_settings = {"max_workers": 1, "output_format": "PDF with images", "output_mode": "source", "custom_output_path": ""}  # Default general settings
         
         # Initialize default configs for all providers
         self._initialize_default_configs()
@@ -1407,6 +1885,18 @@ class OCRApp:
                      background=[('active', dark_bg)],
                      foreground=[('disabled', '#aaaaaa')])
             
+            # Configure Radiobutton style
+            style.configure('TRadiobutton',
+                          background='#212121',
+                          foreground=dark_fg,
+                          font=('Arial', 16),
+                          padding=5,
+                          focuscolor='none')
+            style.map('TRadiobutton',
+                     background=[('active', '#212121'), ('!active', '#212121')],
+                     foreground=[('disabled', '#aaaaaa')],
+                     indicatorcolor=[('selected', '#4CAF50'), ('!selected', dark_field_bg)])
+            
             # Configure Spinbox style
             style.configure('TSpinbox',
                           background=dark_field_bg,
@@ -1553,9 +2043,10 @@ class OCRApp:
         provider_outer_frame, provider_inner_frame = self._create_section(parent, "Transcription Configuration")
         provider_outer_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Create a grid layout for side-by-side dropdowns
+        # Create a grid layout for three side-by-side dropdowns
         provider_inner_frame.grid_columnconfigure(1, weight=1)
         provider_inner_frame.grid_columnconfigure(3, weight=1)
+        provider_inner_frame.grid_columnconfigure(5, weight=1)
         
         # Provider selection (left side)
         tk.Label(provider_inner_frame, text="Provider:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=5)
@@ -1563,25 +2054,36 @@ class OCRApp:
         self.provider_var = tk.StringVar(value=self.selected_provider)
         provider_combo = ttk.Combobox(provider_inner_frame, textvariable=self.provider_var, 
                                     values=["OpenRouter", "Anthropic", "Google", "OpenAI"], 
-                                    state="readonly", width=20, font=("Arial", 14, "bold"))
-        provider_combo.grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=5)
+                                    state="readonly", width=5, font=("Arial", 14, "bold"))
+        provider_combo.grid(row=0, column=1, sticky="ew", padx=(0, 15), pady=5)
         provider_combo.bind("<<ComboboxSelected>>", self.on_provider_changed)
         
-        # Output format selection (right side)
+        # Output format selection (middle)
         tk.Label(provider_inner_frame, text="Output Format:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 10), pady=5)
         
-        self.output_format_var = tk.StringVar(value="PDF")
+        self.output_format_var = tk.StringVar(value="PDF with images")
         format_combo = ttk.Combobox(provider_inner_frame, textvariable=self.output_format_var, 
-                                  values=["PDF", "TXT", "CSV"], 
-                                  state="readonly", width=15, font=("Arial", 14, "bold"))
-        format_combo.grid(row=0, column=3, sticky="ew", padx=(0, 0), pady=5)
+                                  values=["PDF with images", "PDF with images (merged)", "PDF", "PDF (merged)", "TXT", "CSV"], 
+                                  state="readonly", width=18, font=("Arial", 14, "bold"))
+        format_combo.grid(row=0, column=3, sticky="ew", padx=(0, 15), pady=5)
         format_combo.bind("<<ComboboxSelected>>", self.on_output_format_changed)
+        
+        # Threads selection (right side)
+        tk.Label(provider_inner_frame, text="Number of Threads:", bg="#212121", fg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=4, sticky="w", padx=(0, 10), pady=5)
+        
+        self.threads_var = tk.StringVar(value=str(self.general_settings.get("max_workers", 1)))
+        threads_combo = ttk.Combobox(provider_inner_frame, textvariable=self.threads_var, 
+                                   values=["1", "2", "3", "4", "5"], 
+                                   state="readonly", width=1, font=("Arial", 14, "bold"))
+        threads_combo.grid(row=0, column=5, sticky="ew", padx=(0, 0), pady=5)
+        threads_combo.bind("<<ComboboxSelected>>", self.on_threads_changed)
 
     def _create_settings_button_section(self, parent):
-        """Create the 'Edit Settings' button."""
+        """Create the settings buttons section."""
         settings_frame = ttk.Frame(parent)
         settings_frame.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(settings_frame, text="Edit Settings", command=self.open_settings, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(settings_frame, text="API Settings", command=self.open_settings, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(settings_frame, text="Choose Output Location", command=self.open_output_location, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
 
     def _create_dnd_section(self, parent):
         """Create the drag-and-drop section."""
@@ -1723,7 +2225,21 @@ class OCRApp:
         """Handle output format selection change."""
         self.general_settings["output_format"] = self.output_format_var.get()
         self.save_settings()
+        
+        # Update OCR processor if it exists (to handle the new include_images setting)
+        if self.ocr_processor:
+            self.try_create_ocr_processor()
+        
         self.status_var.set(f"Output format changed to {self.output_format_var.get()} | v{VERSION}")
+    
+    def on_threads_changed(self, event=None):
+        """Handle threads selection change."""
+        self.general_settings["max_workers"] = int(self.threads_var.get())
+        self.save_settings()
+        # Update the OCR processor if it exists
+        if self.ocr_processor:
+            self.ocr_processor.max_workers = int(self.threads_var.get())
+        self.status_var.set(f"Threads changed to {self.threads_var.get()} | v{VERSION}")
     
     def update_provider_status(self):
         """Update the provider status display in the status bar."""
@@ -1743,6 +2259,19 @@ class OCRApp:
         else:
             self.status_var.set(f"Ready - Configure {display_name} API key in Settings | v{VERSION}")
     
+    def update_output_location_status(self):
+        """Update the status bar to show current output location."""
+        output_mode = self.general_settings.get("output_mode", "source")
+        
+        if output_mode == "custom":
+            custom_path = self.general_settings.get("custom_output_path", "")
+            if custom_path:
+                self.status_var.set(f"Output location set to: {custom_path} | v{VERSION}")
+            else:
+                self.status_var.set(f"Custom output location not set | v{VERSION}")
+        else:
+            self.status_var.set(f"Output location set to source folder | v{VERSION}")
+    
     def try_create_ocr_processor(self):
         """Try to create OCR processor with current provider and API key."""
         provider_config = self.provider_configs.get(self.selected_provider, {})
@@ -1754,7 +2283,19 @@ class OCRApp:
             
         try:
             max_workers = self.general_settings.get("max_workers", 1)
-            self.ocr_processor = HandwritingOCR(api_key, provider=self.selected_provider, max_workers=max_workers)
+            output_format = self.general_settings.get("output_format", "PDF with images")
+            include_images = "with images" in output_format
+            
+            # Convert GUI output format to OCR processor format
+            ocr_output_format = "PDF"
+            if "merged" in output_format.lower():
+                ocr_output_format = "merged-pdf"
+            elif output_format.upper() == "TXT":
+                ocr_output_format = "TXT"
+            elif output_format.upper() == "CSV":
+                ocr_output_format = "CSV"
+            
+            self.ocr_processor = HandwritingOCR(api_key, provider=self.selected_provider, max_workers=max_workers, output_format=ocr_output_format, include_images=include_images)
             
             # Update transcription config with saved settings
             if "primary" in provider_config and "fallback" in provider_config:
@@ -1787,6 +2328,18 @@ class OCRApp:
             self.update_process_button()
             
             self.save_settings()
+    
+    def open_output_location(self):
+        """Open the output location dialog."""
+        dialog = OutputLocationDialog(self.root, self.general_settings)
+        self.root.wait_window(dialog)
+        
+        if dialog.result:
+            self.general_settings.update(dialog.result)
+            self.save_settings()
+            
+            # Update status bar to show current output location
+            self.update_output_location_status()
             
     def process_files(self):
         """Process the selected files."""
@@ -1836,7 +2389,9 @@ class OCRApp:
             """The thread that runs the file processing."""
             max_workers = self.general_settings.get("max_workers", 1)
             output_format = self.general_settings.get("output_format", "PDF")
-            processor = FileProcessor(self.ocr_processor, self.file_paths, max_workers, self.logger, progress_callback, output_format)
+            output_mode = self.general_settings.get("output_mode", "source")
+            custom_output_path = self.general_settings.get("custom_output_path", "")
+            processor = FileProcessor(self.ocr_processor, self.file_paths, max_workers, self.logger, progress_callback, output_format, output_mode, custom_output_path)
             
             # This makes the processor aware of the dialog's cancellation state
             def check_cancellation():
@@ -1898,8 +2453,11 @@ class OCRApp:
             if output_paths:
                 if output_format == "CSV":
                     message += f"\nCSV file saved to: {output_paths[0]}"
+                elif "merged" in output_format.lower():
+                    message += f"\nMerged PDF file saved to: {output_paths[0]}"
                 else:
-                    message += f"\n{output_format} files saved to: {os.path.dirname(output_paths[0])}"
+                    format_type = "PDF" if output_format.startswith("PDF") else output_format
+                    message += f"\n{format_type} files saved to: {os.path.dirname(output_paths[0])}"
                 message += f"\n\nWould you like to open the output folder?"
                 
                 # Ask if user wants to open the output folder
@@ -1915,7 +2473,8 @@ class OCRApp:
                     else:  # Linux
                         subprocess.run(["xdg-open", folder_path])
             else:
-                message += f"\n\nNo {output_format} files were created due to processing errors."
+                format_type = "PDF" if output_format.startswith("PDF") else output_format
+                message += f"\n\nNo {format_type} files were created due to processing errors."
                 messagebox.showinfo("Processing Complete", message, parent=self.root)
             
             self.status_var.set(f"Processing complete - {len(successful_results)} successful, {len(failed_results)} failed")
@@ -1933,8 +2492,13 @@ class OCRApp:
         
         # Update the output format selection
         if hasattr(self, 'output_format_var'):
-            output_format = self.general_settings.get("output_format", "PDF")
+            output_format = self.general_settings.get("output_format", "PDF with images")
             self.output_format_var.set(output_format)
+            
+        # Update the threads selection
+        if hasattr(self, 'threads_var'):
+            threads = self.general_settings.get("max_workers", 1)
+            self.threads_var.set(str(threads))
             
         # Update provider status and try to create OCR processor
         self.try_create_ocr_processor()
@@ -1962,7 +2526,11 @@ class OCRApp:
                     self.selected_provider = settings.get("selected_provider", "openrouter")
                     
                     # Load general settings
-                    self.general_settings = settings.get("general_settings", {"max_workers": 1, "output_format": "PDF"})
+                    self.general_settings = settings.get("general_settings", {"max_workers": 1, "output_format": "PDF with images", "output_mode": "source", "custom_output_path": ""})
+                    
+                    # Handle legacy "PDF" format by converting to "PDF with images"
+                    if self.general_settings.get("output_format") == "PDF":
+                        self.general_settings["output_format"] = "PDF with images"
                     
                     # Ensure all providers have default configs if missing
                     for provider in ["openai", "anthropic", "openrouter", "google"]:

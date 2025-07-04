@@ -1,58 +1,37 @@
 # Genealogy Assistant AI Handwritten Text Recognition Tool
 
-A free cross-platform application designed to transcribe collections of historical documents into an easier-to-read format. It serves as a front-end to multiple AI APIs (OpenAI, Claude, OpenRouter, and Google Gemini), allowing you to convert image files (JPEG, PNG) and PDF documents into either searchable PDF files (with source images attached), plain text (txt) files, or CSV files.
+A free cross-platform application designed to transcribe collections of historical documents into an easier-to-read format. It serves as a front-end to multiple AI APIs (OpenAI, Claude, OpenRouter, and Google Gemini), allowing you to convert image files (JPEG, PNG) and PDF documents into searchable PDF files, plain text files, or CSV files.
 
-This tool can transcribe thousands of images and PDF pages in a single batch, without the need for user intervention. It is generally not meant to provide 100% accurate transcriptions, as AI transcription are still not perfect, but it is designed to make large collections of documents more readable for humans. 
+This tool can transcribe thousands of images and PDF pages in a single batch, without the need for user intervention. It is generally not meant to provide 100% accurate transcriptions, as AI transcriptions are still not perfect, but it is designed to make large collections of documents more readable for humans.
 
 From within the application you can modify the prompt, model and parameters, enabling you to fine-tune how your images are processed. You can also enable multi-threading to have the application work on more than one image at a time.
 
 ## License
 
-This software is licensed under the **GNU General Public License v3.0 (GPLv3)**. This means you are free to use, modify, and distribute this software under the terms of the GPL. See the [LICENSE](LICENSE) file for the full license text.
-
-- **Freedom to use**: You can use this software for any purpose
-- **Freedom to study and modify**: You have access to the source code and can modify it
-- **Freedom to distribute**: You can share this software with others
-- **Copyleft protection**: If you distribute modified versions, they must also be under GPLv3 
+Licensed under **GNU General Public License v3.0 (GPLv3)**. You are free to use, modify, and distribute this software. See the [LICENSE](LICENSE) file for details.
 
 ## Key Features
 
-- **Simple Drag and Drop Interface**: No need for complicated command-line tools, simply drag and drop your image files (JPEG, PNG) and PDF documents directly into the application window to add them to the queue. 
+- **Simple Drag and Drop Interface**: No need for complicated command-line tools, simply drag and drop your image files (JPEG, PNG) and PDF documents directly into the application window to add them to the queue.
 
 - **Multiple File Format Support**: Process JPEG images, PNG images, and multi-page PDF documents. PDF files are automatically split into individual pages for processing.
 
-- **Efficient Batch Processing**: This tool can transcribe multiple documents simultaneously, so you can speed up the process of working on large batches of images and PDFs. 
+- **Efficient Batch Processing**: This tool can transcribe multiple documents simultaneously, so you can speed up the process of working on large batches of images and PDFs.
 
 - **Multiple AI Providers**: Choose from OpenAI, Anthropic's Claude, Google Gemini, or any OpenRouter model with automatic fallback to secondary models if the primary model refuses or fails.
 
 - **Highly Customizable Settings**: Fine-tune the AI's transcription behaviour to match your specific transcription needs with adjustable prompts and parameters such as temperature and token limits.
 
-- **Flexible Output Formats**: Choose between searchable PDFs (that preserve the original image with embedded transcriptions), plain text or CSV files for lightweight, easily readable transcriptions. 
+- **Flexible Output Formats**: Choose between individual PDFs with images, individual text-only PDFs, merged PDFs (single file with all transcriptions, with or without images), plain text files, or CSV files for lightweight, easily readable transcriptions.
 
 ## AI Provider Support
 
-This tool supports multiple AI providers, each with their own strengths and model options:
-
-### OpenAI
-- **Primary Model**: `o4-mini` with high reasoning effort for complex handwriting
-- **Fallback Model**: `gpt-4o` with optimized settings
-- **Requirements**: OpenAI API key and `openai` Python package
-
-### Claude (Anthropic)  
-- **Primary Model**: `claude-3-5-sonnet-20240620` for superior text recognition
-- **Fallback Model**: `claude-3-haiku-20240307` for faster processing
-- **Requirements**: Anthropic API key and `anthropic` Python package
-
-### Google Gemini
-- **Primary Model**: `gemini-1.5-pro` for advanced reasoning and complex handwriting
-- **Fallback Model**: `gemini-1.5-flash` for faster and more cost-effective processing
-- **Requirements**: Google API key and `google-generativeai` Python package
-
-### OpenRouter
-- **Primary Model**: `anthropic/claude-3.5-sonnet` via OpenRouter
-- **Fallback Model**: `openai/gpt-4o` via OpenRouter  
-- **Requirements**: OpenRouter API key and `requests` Python package
-- **Benefits**: Access to multiple models through a single API
+| Provider | Primary Model | Fallback Model | Requirements |
+|----------|---------------|----------------|--------------|
+| **OpenAI** | o4-mini | gpt-4o | OpenAI API key, `openai` package |
+| **Claude** | claude-3-5-sonnet-20241022 | claude-3-5-haiku-20241022 | Anthropic API key, `anthropic` package |
+| **Google Gemini** | gemini-2.5-flash-lite-preview-06-17 | gemini-2.0-flash-lite | Google API key, `google-generativeai` package |
+| **OpenRouter** | google/gemini-2.5-flash-lite-preview-06-17 | openai/gpt-4o | OpenRouter API key, `requests` package |
 
 ## Installation
 
@@ -81,41 +60,23 @@ This tool supports multiple AI providers, each with their own strengths and mode
 
 ### Quick Setup
 
-1. **Install dependencies** by running the following command in your terminal:
+1. **Install dependencies:**
    ```bash
-   # For all providers
    pip install -r requirements.txt
-   
-   # Or install only what you need:
-   # For OpenAI only:
-   pip install openai Pillow reportlab tkinterdnd2-universal requests PyMuPDF
-   
-   # For Claude:
-   pip install anthropic openai Pillow reportlab tkinterdnd2-universal requests PyMuPDF
-   
-   # For Google Gemini:
-   pip install google-generativeai openai Pillow reportlab tkinterdnd2-universal requests PyMuPDF
-   
-   # For OpenRouter:
-   pip install openai Pillow reportlab tkinterdnd2-universal requests PyMuPDF
    ```
 
-2. **Configure your API key(s)**. The recommended way is to set them as environment variables:
+2. **Set API key** (choose one method):
    ```bash
-   # For OpenAI
-   export OPENAI_API_KEY="your-openai-key-here"
+   # Environment variable (recommended)
+   export OPENAI_API_KEY="your-key-here"
+   export ANTHROPIC_API_KEY="your-key-here"
+   export GOOGLE_API_KEY="your-key-here"
+   export OPENROUTER_API_KEY="your-key-here"
    
-   # For Claude
-   export ANTHROPIC_API_KEY="your-anthropic-key-here"
-   
-   # For Google Gemini
-   export GOOGLE_API_KEY="your-google-api-key-here"
-   
-   # For OpenRouter  
-   export OPENROUTER_API_KEY="your-openrouter-key-here"
+   # Or use --api-key argument when running
    ```
-   
-   Alternatively, you can pass the key directly using the `--api-key` argument when you run the tool.
+
+## Usage
 
 ## Graphical User Interface (GUI)
 
@@ -129,7 +90,23 @@ To launch the GUI, run the following command from your terminal:
 python genea_htr_gui.py
 ```
 
-This will open the GUI application that allows you to select your image directory, choose your AI provider, select your output format (PDF, TXT, or CSV), configure your API key, and start the transcription process without using command-line arguments.
+This will open the GUI application that allows you to drag and drop your image files and PDFs, choose your AI provider, select your output format, configure the number of concurrent threads, and start the transcription process without using command-line arguments.
+
+### GUI Features
+
+- **Drag & Drop Interface**: Simply drag image files (JPEG, PNG) and PDF documents directly into the application window
+- **Provider Selection**: Choose from OpenRouter, Anthropic, Google, or OpenAI
+- **Output Format Options**: 
+  - **PDF with images**: Individual searchable PDFs with source images (default)
+  - **PDF with images (merged)**: Single merged PDF with all transcriptions and source images
+  - **PDF**: Individual text-only searchable PDFs
+  - **PDF (merged)**: Single merged text-only PDF
+  - **TXT**: Individual text files
+  - **CSV**: Single CSV file with all transcriptions
+- **Threads Control**: Adjust concurrent processing threads (1-5) directly from the main screen
+- **API Settings**: Configure API keys and advanced model settings through the API Settings dialog
+- **Output Location**: Choose to save files in source folder or custom location
+- **Real-time Progress**: Live progress tracking with optional log viewer during processing
 
 ## Quick Start
 
@@ -137,146 +114,67 @@ This will open the GUI application that allows you to select your image director
 To process all supported files (JPEG, PNG, PDF) in a specific folder, provide the path to the directory.
 
 ```bash
-# Process all supported files using default OpenRouter provider
-python genea_htr.py /path/to/my-documents
+# Process all files in directory (default: OpenRouter, PDF with images)
+python genea_htr.py /path/to/documents
 
-# Use Claude instead of the default OpenRouter
-python genea_htr.py /path/to/my-documents --provider anthropic
-
-# Use Google Gemini
-python genea_htr.py /path/to/my-documents --provider google
-
-# Use OpenRouter
-python genea_htr.py /path/to/my-documents --provider openrouter
+# Use different providers
+python genea_htr.py /path/to/documents --provider anthropic
+python genea_htr.py /path/to/documents --provider google
+python genea_htr.py /path/to/documents --provider openai
 ```
 
-### Advanced Usage
-You can customize the tool's behavior with command-line arguments.
-
+**Advanced options:**
 ```bash
-# Process files faster using multiple threads
-python genea_htr.py /path/to/images --threads 2
+# Multiple threads and custom output
+python genea_htr.py /path/to/images --threads 3 --output-format txt --output-dir results
 
-# Use a specific provider and API key
-python genea_htr.py /path/to/images --provider anthropic --api-key "your-anthropic-key"
-
-# Save the output PDFs to a custom directory
-python genea_htr.py /path/to/images --output-dir "results"
-
-# Generate text files instead of PDFs
-python genea_htr.py /path/to/images --output-format txt
-
-# Generate a CSV file with all transcriptions
+# Different output formats
 python genea_htr.py /path/to/images --output-format csv
-
-# Combine options for maximum customization
-python genea_htr.py /path/to/images --provider openrouter --threads 3 --api-key "your-key" --output-format csv
+python genea_htr.py /path/to/images --output-format merged-pdf
+python genea_htr.py /path/to/images --output-format pdf --no-images  # text-only PDFs
 ```
 
-## File Organization
-
-### Input Requirements
-The tool supports multiple document formats:
-- **JPEG images** (`.jpg`, `.jpeg`) - Direct image processing
-- **PNG images** (`.png`) - Converted to JPEG for optimal API compatibility  
-- **PDF documents** (`.pdf`) - Automatically split into individual pages for processing
-
-The tool will automatically find all supported files in the directory you specify.
-
-### Output Structure
-By default, the tool creates output files in your input directory. For PDF and TXT formats, it creates a subdirectory (`PDF` or `TXT`). For CSV format, it creates a single file called `transcribed_images.csv` in the input directory.
-
-**PDF Output Format (default):**
-```
-your-documents/
-├── document1.jpg          # Your original JPEG image
-├── document2.png          # Your original PNG image  
-├── document3.pdf          # Your original PDF (3 pages)
-└── PDF/                  # New folder created by the tool
-    ├── document1.pdf      # Searchable PDF with image and transcription
-    ├── document2.pdf      # Searchable PDF with image and transcription
-    ├── document3_page_1.pdf  # Searchable PDF for PDF page 1
-    ├── document3_page_2.pdf  # Searchable PDF for PDF page 2
-    └── document3_page_3.pdf  # Searchable PDF for PDF page 3
-```
-
-**TXT Output Format:**
-```
-your-documents/
-├── document1.jpg          # Your original JPEG image
-├── document2.png          # Your original PNG image  
-├── document3.pdf          # Your original PDF (3 pages)
-└── TXT/                   # New folder created by the tool
-    ├── document1.txt      # Plain text transcription with metadata header
-    ├── document2.txt      # Plain text transcription with metadata header
-    ├── document3_page_1.txt  # Plain text transcription for PDF page 1
-    ├── document3_page_2.txt  # Plain text transcription for PDF page 2
-    └── document3_page_3.txt  # Plain text transcription for PDF page 3
-```
-
-**CSV Output Format:**
-```
-your-documents/
-├── document1.jpg          # Your original JPEG image
-├── document2.png          # Your original PNG image  
-├── document3.pdf          # Your original PDF (3 pages)
-└── transcribed_images.csv # Single CSV file with all transcriptions
-```
-
-You can specify a different output location using the `--output-dir` option.
-
-### Output File Structure
-
-**PDF Files:**
-Each generated PDF file contains:
-- **Page 1+**: The complete text transcription with corresponding formatting.
-- **Last page**: The original image, preserved at full resolution (equivalent to 300 DPI).
-
-**TXT Files:**
-Each generated TXT file contains:
-- **Header**: Metadata including filename, AI provider, model used, and generation timestamp.
-- **Body**: Clean text transcription optimized for readability and searchability.
-
-**CSV Files:**
-The generated CSV file contains:
-- **Column 1 (filename)**: Name of the original image file
-- **Column 2 (transcription)**: Full text transcription in plain text format
-- **Column 3 (model)**: AI provider and model used for transcription
-- **Column 4 (date)**: Generation timestamp
-
-*Note: CSV text is automatically cleaned to handle Unicode characters and special symbols (like ≈, ø, æ) by converting them to ASCII equivalents for better compatibility with spreadsheet applications.*
-
-## Command-Line Options
+### Command-Line Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `input_dir` | The directory containing image files (JPEG, PNG) and PDF documents to process. **Required**. | `python genea_htr.py ./documents` |
-| `--provider` | AI provider to use: `openai`, `anthropic`, `google`, or `openrouter` (default: `openrouter`). | `--provider google` |
-| `--api-key` | API key for the chosen provider. Optional if environment variable is set. | `--api-key "your-key"` |
-| `--output-format` | Output format: `pdf`, `txt`, or `csv` (default: `pdf`). | `--output-format csv` |
-| `--threads` or `-t` | Number of concurrent threads for processing (1-10, default: 1). | `--threads 3` |
-| `--output-dir` | A custom directory for output files. Defaults to a `PDF` or `TXT` folder inside the `input_dir`. | `--output-dir "results"` |
+| `input_dir` | Directory containing files to process (**required**) | `./documents` |
+| `--provider` | AI provider: `openai`, `anthropic`, `google`, `openrouter` (default) | `--provider google` |
+| `--api-key` | API key (optional if env variable set) | `--api-key "your-key"` |
+| `--output-format` | `pdf` (default), `txt`, `csv`, `merged-pdf` | `--output-format txt` |
+| `--no-images` | Create text-only PDFs | `--no-images` |
+| `--threads` | Concurrent threads (1-10, default: 1) | `--threads 3` |
+| `--output-dir` | Custom output directory | `--output-dir "results"` |
 
-## Concurrent Processing
+## File Organization
 
-The tool can process multiple files simultaneously to reduce the total processing time.
+### Input Support
+- **JPEG/PNG images** - Processed directly (PNG converted to JPEG for API compatibility)
+- **PDF documents** - Automatically split into individual pages at 300 DPI
 
-### Thread Count Recommendations
-- **1 thread**: Processes files one by one. This is the slowest but most stable option.
-- **2-3 threads**: A good balance of speed and stability, recommended for most use cases.
-- **4+ threads**: Offers the fastest processing but increases the risk of hitting API rate limits.
-
-### Examples
-```bash
-# For small batches (1-10 images), a single thread is sufficient
-python genea_htr.py images/ --threads 1
-
-# For medium batches (10-50 images), 2 threads are recommended
-python genea_htr.py images/ --threads 2
-
-# For large batches (50+ images), consider using 3 or more threads
-python genea_htr.py images/ --threads 3
+### Output Structure
 ```
+your-documents/
+├── document1.jpg                    # Original files
+├── document2.png                    
+├── document3.pdf                    # Multi-page PDF
+├── PDF/                             # Individual PDFs (default)
+│   ├── document1.pdf               # Searchable PDF with image + text
+│   ├── document2.pdf               
+│   ├── document3_page_1.pdf        # PDF pages processed separately
+│   └── document3_page_2.pdf        
+├── TXT/                            # Text format output
+│   ├── document1.txt               # Plain text with metadata
+│   └── document2.txt               
+├── transcribed_images.csv          # CSV format (single file)
+└── transcribed_images.pdf       # Merged PDF format (single file)
+```
+
+**Output formats:**
+- **Individual PDFs** (default): Searchable PDFs with transcription + optional source image
+- **Merged PDF**: Single PDF with all transcriptions + optional source images
+- **TXT files**: Plain text with metadata headers
+- **CSV file**: Filename, transcription, model, date columns
 
 ## How It Works
 
@@ -286,73 +184,27 @@ python genea_htr.py images/ --threads 3
    - **PDF documents**: Automatically split into individual pages at 300 DPI resolution for processing
 3. **AI Transcription**: Each image is sent to your chosen AI provider's primary model for transcription. If this fails, it automatically retries with a fallback model from the same provider.
 4. **Specialized Prompts**: It uses carefully designed prompts optimized for transcribing handwritten text from historical documents.
-5. **Output Generation**: Based on your chosen format, either a searchable PDF (containing the full-resolution image and transcribed text) or a plain text file (with metadata header and transcription) is generated for each image. For CSV output, a single file is created for all images in the batch.
+5. **Output Generation**: Based on your chosen format, the tool generates the appropriate output files.
 6. **Text Cleaning**: The transcribed text is sanitized to remove problematic characters and ensure optimal output quality.
 
 ## Example Workflow
 
-1. **Prepare your documents** in a single folder:
-   ```
-   my-documents/
-   ├── handwritten_letter.jpg    # JPEG image
-   ├── old_document.png          # PNG image  
-   └── multi_page_record.pdf     # PDF document (3 pages)
-   ```
-
-2. **Run the tool**, specifying the folder, output format, and desired number of threads:
+1. **Prepare documents** in a folder
+2. **Run the tool:**
    ```bash
-   # For PDF output (default)
-   python genea_htr.py my-documents/ --threads 2
-   
-   # For TXT output
-   python genea_htr.py my-documents/ --output-format txt --threads 2
-   
-   # For CSV output
-   python genea_htr.py my-documents/ --output-format csv --threads 2
+   python genea_htr.py my-documents/ --threads 2 --output-format pdf
    ```
+3. **Find results** in the `PDF/` subdirectory or specified output location
 
-3. **Find your results** in the newly created folder:
+## Threading & Performance
 
-   **PDF Output:**
-   ```
-   my-documents/
-   ├── handwritten_letter.jpg
-   ├── old_document.png
-   ├── multi_page_record.pdf
-   └── PDF/
-       ├── handwritten_letter.pdf          # Searchable PDF from JPEG
-       ├── old_document.pdf                # Searchable PDF from PNG
-       ├── multi_page_record_page_1.pdf    # Searchable PDF from PDF page 1
-       ├── multi_page_record_page_2.pdf    # Searchable PDF from PDF page 2
-       └── multi_page_record_page_3.pdf    # Searchable PDF from PDF page 3
-   ```
-
-   **TXT Output:**
-   ```
-   my-documents/
-   ├── handwritten_letter.jpg
-   ├── old_document.png
-   ├── multi_page_record.pdf
-   └── TXT/
-       ├── handwritten_letter.txt          # Text transcription from JPEG
-       ├── old_document.txt                # Text transcription from PNG
-       ├── multi_page_record_page_1.txt    # Text transcription from PDF page 1
-       ├── multi_page_record_page_2.txt    # Text transcription from PDF page 2
-       └── multi_page_record_page_3.txt    # Text transcription from PDF page 3
-   ```
-
-   **CSV Output:**
-   ```
-   my-documents/
-   ├── handwritten_letter.jpg
-   ├── old_document.png
-   ├── multi_page_record.pdf
-   └── transcribed_images.csv             # Single CSV with all transcriptions
-   ```
+- **1 thread**: Slowest but most stable
+- **2-3 threads**: Recommended balance of speed and stability  
+- **4+ threads**: Fastest but may hit API rate limits
 
 ## Cost Considerations
 
-- This tool uses paid AI API services. The cost depends on the provider, model used, and complexity of the images. 
+- This tool uses paid AI API services. The cost depends on the provider, model used, and complexity of the images.
 - All providers use a maximum of 8000 tokens per image by default.
 - Process a small batch of images first to estimate the cost.
 - Regularly check your API usage on your provider's dashboard:
@@ -363,29 +215,25 @@ python genea_htr.py images/ --threads 3
 
 ## Troubleshooting
 
-### Common Issues
+**Common Issues:**
+- **"API key is required"**: Set environment variable or use `--api-key`
+- **"Unsupported provider"**: Use `openai`, `anthropic`, `google`, or `openrouter`
+- **Import errors**: Install required provider package (see Installation)
+- **"No supported files found"**: Check directory path and file extensions
+- **"PyMuPDF is required"**: Install with `pip install PyMuPDF`
+- **Slow processing**: Reduce threads or check internet connection
+- **Empty transcriptions**: Ensure images are clear and readable
 
-- **Error: "API key is required"**: Ensure you have set the appropriate environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENROUTER_API_KEY`) or are using the `--api-key` option.
-- **Error: "Unsupported provider"**: Make sure you're using one of the supported providers: `openai`, `anthropic`, `google`, or `openrouter`.
-- **Import errors**: Install the required library for your chosen provider (see installation instructions above).
-- **Error: "No supported files found"**: Verify that the directory path is correct and that it contains files with `.jpg`, `.jpeg`, `.png`, or `.pdf` extensions.
-- **Error: "PyMuPDF is required for PDF processing"**: Install PyMuPDF with `pip install PyMuPDF` to process PDF files.
-- **Symptom: Processing is slow**: This can be caused by a slow internet connection or high load on the AI provider's API. Try reducing the number of threads.
-- **Symptom: Empty transcriptions**: The tool automatically uses a fallback model to prevent this. Check that your images are clear, readable, and contain text.
-- **Symptom: Large PDF files take a long time**: Multi-page PDFs are processed page by page. Consider splitting large PDFs into smaller files or using more threads.
-
-### Getting Help
-If you encounter problems, follow these steps:
-- Review the console output for specific error messages.
-- Ensure your API key is correct and your account has sufficient credits.
-- Try processing a single file to isolate the problem.
-- Consider switching to a different provider if one is experiencing issues.
+**Getting Help:**
+- Check console output for error messages
+- Verify API key and account credits
+- Test with single file first
+- Try different provider if issues persist
 
 ## Best Practices
 
-### Performance Tips
-- Use high-resolution images for the most accurate transcriptions.
-- Start with small batches to fine-tune your settings.
-- Use 1-2 threads for a balance of speed and reliability.
-- Monitor your API usage during large processing jobs.
-- Ensure you have a stable internet connection for best performance.
+- Use high-resolution images for best accuracy
+- Start with small batches to test settings
+- Use 1-2 threads for reliability
+- Monitor API usage during large jobs
+- Ensure stable internet connection

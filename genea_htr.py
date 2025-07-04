@@ -309,7 +309,7 @@ class GeminiProvider(APIProvider):
 
 
 class HandwritingOCR:
-    def __init__(self, api_key: str, provider: str = "openrouter", output_dir: str = "output", max_workers: int = 1, output_format: str = "PDF"):
+    def __init__(self, api_key: str, provider: str = "openrouter", output_dir: str = "output", max_workers: int = 1, output_format: str = "PDF", include_images: bool = True):
         """
         Initialize the HandwritingOCR processor.
         
@@ -319,6 +319,7 @@ class HandwritingOCR:
             output_dir: Directory to save output files (only used for legacy combined PDF functionality)
             max_workers: Maximum number of concurrent threads for processing
             output_format: Output format ("PDF" or "TXT")
+            include_images: Whether to include source images in PDF output (ignored for TXT/CSV)
         """
         self.api_key = api_key
         self.provider_name = provider.lower()
@@ -326,6 +327,7 @@ class HandwritingOCR:
         # Don't create output_dir automatically - only create it when actually needed
         self.max_workers = max_workers
         self.output_format = output_format.upper()
+        self.include_images = include_images
         self._lock = threading.Lock()  # For thread-safe operations
         
         # Set up logging
@@ -920,12 +922,14 @@ Transcription:
                 footer_width = c.stringWidth(footer_text, "Helvetica", 9)
                 c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
                 
-                # End transcription page(s) and start new page for image
-                c.showPage()
-                
-                # Last page: Image at full size with no margins
-                c.setPageSize((img_width_pts, img_height_pts))  # Switch to custom image size
-                c.drawImage(image_path, 0, 0, width=img_width_pts, height=img_height_pts)
+                # Only include image if include_images is True
+                if self.include_images:
+                    # End transcription page(s) and start new page for image
+                    c.showPage()
+                    
+                    # Last page: Image at full size with no margins
+                    c.setPageSize((img_width_pts, img_height_pts))  # Switch to custom image size
+                    c.drawImage(image_path, 0, 0, width=img_width_pts, height=img_height_pts)
                 
                 # Save the PDF
                 c.save()
@@ -1200,7 +1204,7 @@ Transcription:
             transcription = self.transcribe_image(image_path)
             
             # Create individual output file (PDF, TXT, or CSV)
-            if self.output_format == "PDF":
+            if self.output_format == "PDF" or self.output_format.startswith("PDF"):
                 if is_pdf_page:
                     # For PDF pages, include page info in filename
                     original_name = Path(original_file).stem
@@ -1257,7 +1261,7 @@ Transcription:
                 "error": str(e)
             }
 
-    def process_batch(self, input_dir: str, output_filename: str = "transcribed_documents.pdf") -> Dict:
+    def process_batch(self, input_dir: str, output_filename: str = "transcribed_images.pdf") -> Dict:
         """
         Process a batch of image and PDF files and create individual searchable PDFs.
         
@@ -1374,7 +1378,7 @@ Transcription:
                 except OSError as e:
                     self.logger.warning(f"Could not clean up temporary file {temp_file}: {e}")
         
-        # If output format is CSV, create the CSV file now
+        # Handle special output formats
         if self.output_format.upper() == "CSV" and results:
             try:
                 # Use the input directory as the source directory for CSV
@@ -1384,6 +1388,15 @@ Transcription:
                 self.logger.info(f"CSV file created: {csv_path}")
             except Exception as e:
                 self.logger.error(f"Error creating CSV file: {e}")
+        elif self.output_format.upper() == "MERGED-PDF" and results:
+            try:
+                # Create merged PDF from all results
+                merged_pdf_path = self.create_merged_pdf(results, input_dir, output_filename)
+                # For merged PDF, return the merged PDF file path as the single output
+                pdf_paths = [merged_pdf_path]
+                self.logger.info(f"Merged PDF file created: {merged_pdf_path}")
+            except Exception as e:
+                self.logger.error(f"Error creating merged PDF file: {e}")
         
         # Count successful and failed processing
         successful = len([r for r in results if r["status"] == "success"])
@@ -1399,6 +1412,164 @@ Transcription:
             "failed_files": failed,
             "results": results
         }
+
+    def create_merged_pdf(self, results: List[Dict], input_dir: str, output_filename: str) -> str:
+        """
+        Create a merged PDF from all transcription results using streaming canvas approach.
+        
+        Args:
+            results: List of result dictionaries from processing
+            input_dir: Directory where the merged PDF should be saved
+            output_filename: Output PDF filename
+            
+        Returns:
+            Path to the created merged PDF file
+        """
+        # Save merged PDF to input directory
+        merged_pdf_path = Path(input_dir) / output_filename
+        
+        try:
+            # Use canvas for streaming approach - more memory efficient
+            from reportlab.lib.pagesizes import letter
+            c = canvas.Canvas(str(merged_pdf_path), pagesize=letter)
+            
+            # Track if we need to include images
+            include_images = self.include_images
+            
+            # Process each result
+            for i, result in enumerate(results):
+                if result["status"] != "success":
+                    continue
+                
+                # Clean the transcription text to prevent black squares in PDF
+                cleaned_transcription = self.clean_text_for_pdf(result['transcription'])
+                
+                # Page setup
+                margin = 72  # 1 inch margins
+                y_position = letter[1] - margin
+                line_height = 14
+                
+                # Title
+                c.setFont("Helvetica-Bold", 16)
+                c.drawString(margin, y_position, f"Document {i+1}: {result['filename']}")
+                y_position -= 30
+                
+                # Transcription header
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(margin, y_position, "Transcription:")
+                y_position -= 20
+                
+                # Transcription text
+                c.setFont("Helvetica", 11)
+                lines = cleaned_transcription.split('\n')
+                
+                for line in lines:
+                    # Check if we need a new page
+                    if y_position < margin + 100:  # Leave space for footer
+                        # Add footer to current page
+                        c.setFont("Helvetica", 9)
+                        c.setFillGray(0.5)
+                        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        provider_info = f"{self.provider_name.upper()}: {self.transcription_config['primary']['model']}"
+                        footer_text = f"Generated by {provider_info} on {current_date}"
+                        footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                        c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                        c.setFillGray(0)  # Reset to black
+                        
+                        # Start new page
+                        c.showPage()
+                        y_position = letter[1] - margin
+                        c.setFont("Helvetica", 11)
+                    
+                    # Handle long lines by wrapping
+                    if len(line) > 85:  # Approximate character limit per line
+                        words = line.split(' ')
+                        current_line = ""
+                        for word in words:
+                            if len(current_line + word) < 85:
+                                current_line += word + " "
+                            else:
+                                if current_line:
+                                    c.drawString(margin, y_position, current_line.strip())
+                                    y_position -= line_height
+                                    if y_position < margin + 100:
+                                        # Add footer and start new page
+                                        c.setFont("Helvetica", 9)
+                                        c.setFillGray(0.5)
+                                        footer_text = f"Generated by {provider_info} on {current_date}"
+                                        footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                                        c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                                        c.setFillGray(0)
+                                        c.showPage()
+                                        y_position = letter[1] - margin
+                                        c.setFont("Helvetica", 11)
+                                current_line = word + " "
+                        if current_line:
+                            c.drawString(margin, y_position, current_line.strip())
+                            y_position -= line_height
+                    else:
+                        c.drawString(margin, y_position, line)
+                        y_position -= line_height
+                
+                # Add image if include_images is True - use full page like individual PDFs
+                if include_images:
+                    # Add footer to transcription page
+                    c.setFont("Helvetica", 9)
+                    c.setFillGray(0.5)
+                    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    provider_info = f"{self.provider_name.upper()}: {self.transcription_config['primary']['model']}"
+                    footer_text = f"Generated by {provider_info} on {current_date}"
+                    footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                    c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                    c.setFillGray(0)  # Reset to black
+                    
+                    try:
+                        # Start new page for image
+                        c.showPage()
+                        
+                        page_width, page_height = letter
+                        
+                        # Draw image, centered, fitting the page while preserving aspect ratio
+                        c.drawImage(result['image_path'], 0, 0, width=page_width, height=page_height, preserveAspectRatio=True, anchor='c')
+                        
+                        # Ensure we're back to letter size for next document
+                        c.setPageSize(letter)
+                                
+                    except Exception as e:
+                        self.logger.warning(f"Could not add image {result['filename']} to merged PDF: {e}")
+                        # If image fails, just add a note on the transcription page
+                        c.setFont("Helvetica", 10)
+                        c.drawString(margin, y_position - 20, f"[Image: {result['filename']} - Could not display]")
+                else:
+                    # Add footer to transcription page when not including images
+                    c.setFont("Helvetica", 9)
+                    c.setFillGray(0.5)
+                    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    provider_info = f"{self.provider_name.upper()}: {self.transcription_config['primary']['model']}"
+                    footer_text = f"Generated by {provider_info} on {current_date}"
+                    footer_width = c.stringWidth(footer_text, "Helvetica", 9)
+                    c.drawString((letter[0] - footer_width) / 2, 50, footer_text)
+                    c.setFillGray(0)  # Reset to black
+                
+                # Add page break between documents (except for the last one)
+                # Note: Footer is already added above in the image/no-image handling
+                successful_results = [r for r in results if r["status"] == "success"]
+                if i < len(successful_results) - 1:
+                    # Start new page for next document
+                    c.showPage()
+                    c.setPageSize(letter)  # Ensure we're back to letter size
+            
+            # Final footer is already added for each document, no need for additional footer
+            
+            # Save the PDF
+            c.save()
+            
+            self.logger.info(f"Created merged PDF: {os.path.basename(merged_pdf_path)}")
+            return str(merged_pdf_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating merged PDF: {e}")
+            raise
 
     def create_searchable_pdf(self, results: List[Dict], output_filename: str) -> str:
         # Create output directory only when actually needed
@@ -1517,8 +1688,10 @@ def main():
     parser.add_argument("--provider", choices=["openrouter", "anthropic", "google", "openai"], default="openrouter", 
                         help="AI provider to use (default: openrouter)")
     parser.add_argument("--output-dir", default="output", help="Output directory for results")
-    parser.add_argument("--output-filename", default="transcribed_documents.pdf", help="Output PDF filename")
-    parser.add_argument("--output-format", choices=["pdf", "txt", "csv"], default="pdf", help="Output format: pdf, txt, or csv (default: pdf)")
+    parser.add_argument("--output-filename", default="transcribed_images.pdf", help="Output PDF filename")
+    parser.add_argument("--output-format", choices=["pdf", "txt", "csv", "merged-pdf"], default="pdf", help="Output format: pdf, txt, csv, or merged-pdf (default: pdf)")
+    parser.add_argument("--no-images", action="store_true", help="For PDF output, exclude source images and create text-only PDFs")
+    parser.add_argument("--merged", action="store_true", help="Create a single merged PDF instead of individual PDFs (deprecated: use --output-format merged-pdf)")
     parser.add_argument("--threads", "-t", type=int, default=1, help="Number of concurrent threads (default: 1)")
     
     args = parser.parse_args()
@@ -1552,9 +1725,15 @@ def main():
         print(f"Error: Input directory '{args.input_dir}' does not exist.")
         sys.exit(1)
     
+    # Handle merged PDF logic
+    output_format = args.output_format
+    if args.merged:
+        print("Warning: --merged flag is deprecated. Use --output-format merged-pdf instead.")
+        output_format = "merged-pdf"
+    
     # Create OCR processor
     try:
-        ocr = HandwritingOCR(api_key=api_key, provider=args.provider, output_dir=args.output_dir, max_workers=args.threads, output_format=args.output_format)
+        ocr = HandwritingOCR(api_key=api_key, provider=args.provider, output_dir=args.output_dir, max_workers=args.threads, output_format=output_format, include_images=not args.no_images)
     except ImportError as e:
         print(f"Error: {e}")
         print(f"Please install the required library for {args.provider}:")
@@ -1576,15 +1755,19 @@ def main():
         results = ocr.process_batch(args.input_dir, args.output_filename)
         
         if results["status"] == "success":
-            output_format = args.output_format.upper()
+            final_output_format = output_format.upper()
             print(f"\n✅ Processing completed using {args.provider.upper()}!")
             
-            if output_format == "CSV":
+            if final_output_format == "CSV":
                 print(f"📄 Created CSV file with all transcriptions:")
                 for file_path in results['pdf_paths']:
                     print(f"   - {file_path}")
+            elif final_output_format == "MERGED-PDF":
+                print(f"📄 Created merged PDF file:")
+                for file_path in results['pdf_paths']:
+                    print(f"   - {file_path}")
             else:
-                print(f"📄 Created {len(results['pdf_paths'])} individual {output_format} files:")
+                print(f"📄 Created {len(results['pdf_paths'])} individual {final_output_format} files:")
                 for file_path in results['pdf_paths']:
                     print(f"   - {file_path}")
             
