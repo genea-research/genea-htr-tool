@@ -47,36 +47,37 @@ from datetime import datetime
 from genea_htr import HandwritingOCR
 
 # Application version
-VERSION = "0.3.6"
+VERSION = "0.3.7"
 
 
 class BaseDialog(tk.Toplevel):
     """Base class for dialog windows."""
     def __init__(self, parent, title, min_width=600, min_height=400, resizable=(True, True)):
-        super().__init__(parent)
+        master = parent if isinstance(parent, tk.Widget) else parent.root
+        super().__init__(master)
         self.parent = parent  # Store parent reference
         self.title(title)
-        self.transient(parent)
+        self.transient(master)
         self.grab_set()
         self.configure(bg="#2b2b2b")
         self.result = None
 
         self.protocol("WM_DELETE_WINDOW", self.cancel)
 
-        self.center_dialog(parent, min_width, min_height)
+        self.center_dialog(master, min_width, min_height)
         self.resizable(resizable[0], resizable[1])
 
-    def center_dialog(self, parent, min_width, min_height):
+    def center_dialog(self, parent_widget, min_width, min_height):
         """Center the dialog on the parent window."""
         self.update_idletasks()
         
         dialog_width = max(min_width, self.winfo_reqwidth())
         dialog_height = max(min_height, self.winfo_reqheight())
 
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
+        parent_x = parent_widget.winfo_x()
+        parent_y = parent_widget.winfo_y()
+        parent_width = parent_widget.winfo_width()
+        parent_height = parent_widget.winfo_height()
 
         x = parent_x + (parent_width // 2) - (dialog_width // 2)
         y = parent_y + (parent_height // 2) - (dialog_height // 2)
@@ -92,9 +93,11 @@ class BaseDialog(tk.Toplevel):
 class LogHandler(logging.Handler):
     """Custom logging handler that sends log messages to a queue for GUI display."""
     
-    def __init__(self, log_queue):
+    def __init__(self, log_queue, log_history, app_instance):
         super().__init__()
         self.log_queue = log_queue
+        self.log_history = log_history
+        self.app = app_instance
         
     def emit(self, record):
         """Send log record to the queue."""
@@ -102,7 +105,11 @@ class LogHandler(logging.Handler):
             # Format the log message with timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             message = f"[{timestamp}] {record.getMessage()}"
-            self.log_queue.put(message)
+            self.log_history.append(message)
+
+            # Only put the message in the queue if the viewer is currently open
+            if self.app.log_viewer and self.app.log_viewer.winfo_exists():
+                self.log_queue.put(message)
         except Exception:
             # Don't let logging errors crash the application
             pass
@@ -111,10 +118,11 @@ class LogHandler(logging.Handler):
 class LogViewerDialog(BaseDialog):
     """Dialog for viewing real-time logs."""
     
-    def __init__(self, parent, log_queue, on_close=None):
+    def __init__(self, parent, log_queue, log_history, on_close=None):
         super().__init__(parent, "Processing Logs", min_width=800, min_height=600)
         
         self.log_queue = log_queue
+        self.log_history = log_history
         self.on_close_callback = on_close
         self.running = True
         
@@ -122,6 +130,7 @@ class LogViewerDialog(BaseDialog):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
 
         self.create_widgets()
+        self.load_history()
         self.start_log_monitoring()
         
     def create_widgets(self):
@@ -159,6 +168,21 @@ class LogViewerDialog(BaseDialog):
         self.auto_scroll_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(button_frame, text="Auto-scroll", variable=self.auto_scroll_var, style='TCheckbutton').pack(side=tk.RIGHT, padx=(0, 10))
         
+    def load_history(self):
+        """Load historical log messages."""
+        try:
+            self.log_text.config(state=tk.NORMAL)
+            for message in self.log_history:
+                self.log_text.insert(tk.END, message + "\n")
+            
+            # Auto-scroll to bottom after loading history
+            if self.auto_scroll_var.get():
+                self.log_text.see(tk.END)
+            
+            self.log_text.config(state=tk.DISABLED)
+        except Exception:
+            pass
+
     def start_log_monitoring(self):
         """Start monitoring the log queue for new messages."""
         self.check_log_queue()
@@ -837,13 +861,12 @@ class OCRProgressDialog(BaseDialog):
     """Dialog showing OCR processing progress."""
     
     def __init__(self, parent, total_files: int, log_queue=None):
-        super().__init__(parent, "Processing Files", min_width=500, min_height=250, resizable=(False, False))
+        super().__init__(parent, "Processing Files", min_width=500, min_height=220, resizable=(False, False))
         
         self.total_files = total_files
         self.current_file = 0
         self.cancelled = False
         self.log_queue = log_queue
-        self.log_viewer = None
         
         # Prevent closing with default cancel
         self.protocol("WM_DELETE_WINDOW", self.cancel)
@@ -878,7 +901,7 @@ class OCRProgressDialog(BaseDialog):
         
         # View Logs button (only show if log_queue is available)
         if self.log_queue:
-            ttk.Button(button_frame, text="View Logs", command=self.show_logs, style='Rounded.TButton').pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="View Logs", command=self.parent.show_log_viewer, style='Rounded.TButton').pack(side=tk.LEFT, padx=(0, 10))
         
         # Cancel button
         ttk.Button(button_frame, text="Cancel", command=self.cancel, style='Rounded.TButton').pack(side=tk.RIGHT)
@@ -901,18 +924,7 @@ class OCRProgressDialog(BaseDialog):
         
     def show_logs(self):
         """Show the log viewer dialog."""
-        if self.log_queue:
-            if self.log_viewer is None:
-                # Create a new log viewer if one isn't active
-                self.log_viewer = LogViewerDialog(self, self.log_queue, on_close=self.on_log_viewer_closed)
-            else:
-                try:
-                    # If the window exists, bring it to the front
-                    self.log_viewer.lift()
-                    self.log_viewer.grab_set()
-                except tk.TclError:
-                    # Failsafe: if the window was destroyed unexpectedly
-                    self.log_viewer = LogViewerDialog(self, self.log_queue, on_close=self.on_log_viewer_closed)
+        self.parent.show_log_viewer()
     
     def cancel(self):
         """Handle cancel request."""
@@ -926,9 +938,95 @@ class OCRProgressDialog(BaseDialog):
     def close(self):
         """Close the dialog."""
         # Close log viewer if open
-        if self.log_viewer:
-            self.log_viewer.cancel()
         super().cancel()
+
+
+class ResultsDialog(BaseDialog):
+    """Dialog showing processing results and providing actions."""
+
+    def __init__(self, parent, results, output_paths, log_queue, general_settings, on_close=None):
+        super().__init__(parent, "Processing Complete", min_width=600, min_height=250, resizable=(False, False))
+
+        self.results = results
+        self.output_paths = output_paths
+        self.log_queue = log_queue
+        self.general_settings = general_settings
+        self.on_close_callback = on_close
+        self.log_viewer = None
+
+        self.protocol("WM_DELETE_WINDOW", self.close_dialog)
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        """Create the results dialog widgets."""
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        title_label = ttk.Label(main_frame, text="Processing Complete!", font=("Arial", 22, "bold"))
+        title_label.pack(pady=(0, 15))
+
+        successful_results = [r for r in self.results if r["status"] == "success"]
+        failed_results = [r for r in self.results if r["status"] == "error"]
+
+        summary_text = f"Successfully processed: {len(successful_results)} files\n"
+        if failed_results:
+            summary_text += f"Failed to process: {len(failed_results)} files"
+
+        summary_label = ttk.Label(main_frame, text=summary_text, font=("Arial", 18, "bold"), justify="center")
+        summary_label.pack(pady=(0, 15))
+
+        if self.output_paths:
+            output_format = self.general_settings.get("output_format", "PDF")
+            path_text = ""
+            if output_format == "CSV":
+                path_text = f"CSV file saved to: {self.output_paths[0]}"
+            elif "merged" in output_format.lower():
+                path_text = f"Merged PDF file saved to: {self.output_paths[0]}"
+            else:
+                format_type = "PDF" if output_format.startswith("PDF") else output_format
+                path_text = f"{format_type} files saved to: {os.path.dirname(self.output_paths[0])}"
+
+            path_label = ttk.Label(main_frame, text=path_text, font=("Arial", 16), wraplength=550, justify="center")
+            path_label.pack(pady=(0, 15))
+
+        # Buttons frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+
+        ttk.Button(button_frame, text="Close", command=self.close_dialog, style='Rounded.TButton').pack(side=tk.RIGHT)
+
+        if self.output_paths:
+            ttk.Button(button_frame, text="Open Output Folder", command=self.open_output_folder, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+
+        if self.log_queue:
+            ttk.Button(button_frame, text="View Logs", command=self.show_logs, style='Rounded.TButton').pack(side=tk.LEFT)
+
+
+    def open_output_folder(self):
+        """Open the output folder."""
+        import subprocess
+        import platform
+        
+        folder_path = os.path.dirname(self.output_paths[0])
+        if platform.system() == "Darwin":  # macOS
+            subprocess.run(["open", folder_path])
+        elif platform.system() == "Windows":
+            subprocess.run(["explorer", folder_path])
+        else:  # Linux
+            subprocess.run(["xdg-open", folder_path])
+
+    def on_log_viewer_closed(self):
+        """Callback for when the log viewer is closed."""
+        self.log_viewer = None
+
+    def show_logs(self):
+        """Show the log viewer dialog."""
+        self.parent.show_log_viewer()
+
+    def close_dialog(self):
+        """Handle closing the dialog."""
+        self.destroy()
 
 
 class FileProcessor:
@@ -1674,6 +1772,7 @@ class OCRApp:
         
         # Center window
         self.center_window()
+        self.log_viewer = None
     
     def _initialize_default_configs(self):
         """Initialize default configurations for all providers."""
@@ -1696,9 +1795,10 @@ class OCRApp:
         """Set up the logging system for real-time log viewing."""
         # Create a queue for log messages
         self.log_queue = queue.Queue()
+        self.log_history = []
         
         # Create and configure the custom log handler
-        self.log_handler = LogHandler(self.log_queue)
+        self.log_handler = LogHandler(self.log_queue, self.log_history, self)
         self.log_handler.setLevel(logging.INFO)
         
         # Create a logger for the application
@@ -2084,31 +2184,33 @@ class OCRApp:
         settings_frame.pack(fill=tk.X, pady=(0, 10))
         ttk.Button(settings_frame, text="API Settings", command=self.open_settings, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
         ttk.Button(settings_frame, text="Choose Output Location", command=self.open_output_location, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(settings_frame, text="View Logs", command=self.show_log_viewer, style='Rounded.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+
 
     def _create_dnd_section(self, parent):
         """Create the drag-and-drop section."""
-        drop_pack_options = {"fill": tk.BOTH, "expand": True, "padx": 20, "pady": (0, 20)}
+        drop_pack_options = {"fill": tk.BOTH, "expand": True, "padx": 20, "pady": 10}
         drop_outer_frame, drop_content = self._create_section(parent, "Drag & Drop Files Here", drop_pack_options)
-        drop_outer_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        drop_outer_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.drop_frame = drop_outer_frame
 
         drop_container = tk.Frame(drop_content, bg="#212121")
         drop_container.pack(expand=True)
 
-        self.drop_icon = tk.Label(drop_container, text="📁", font=("Arial", 64), anchor="center", bg="#212121", fg="#ffffff")
-        self.drop_icon.pack(pady=(0, 10))
+        self.drop_icon = tk.Label(drop_container, text="📁", font=("Arial", 48), anchor="center", bg="#212121", fg="#ffffff")
+        self.drop_icon.pack(pady=(0, 5))
 
         self.drop_label = tk.Label(drop_container, text="Drag image/PDF files here\nor click to browse", font=("Arial", 16), anchor="center", justify="center", bg="#212121", fg="#ffffff")
-        self.drop_label.pack()
+        self.drop_label.pack(pady=(0, 20))
 
         for widget in [self.drop_icon, self.drop_label, drop_container, self.drop_frame]:
             widget.bind("<Button-1>", self.browse_files)
     
     def _create_file_list_section(self, parent):
         """Create the file list display section."""
-        list_outer_frame, list_inner_frame = self._create_section(parent, "Selected Files", {"fill": tk.X, "padx": 10, "pady": (0, 10)})
-        list_outer_frame.pack(fill=tk.X, pady=(0, 10))
+        list_outer_frame, list_inner_frame = self._create_section(parent, "Selected Files", {"fill": tk.BOTH, "expand": True, "padx": 10, "pady": (0, 10)})
+        list_outer_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         self.file_listbox = tk.Listbox(list_inner_frame, height=6,
                                      bg="#3c3c3c", fg="#ffffff",
@@ -2315,7 +2417,7 @@ class OCRApp:
             
     def open_settings(self):
         """Open the settings dialog."""
-        dialog = SettingsDialog(self.root, self.provider_configs, self.general_settings)
+        dialog = SettingsDialog(self, self.provider_configs, self.general_settings)
         self.root.wait_window(dialog)
         
         if dialog.result:
@@ -2331,7 +2433,7 @@ class OCRApp:
     
     def open_output_location(self):
         """Open the output location dialog."""
-        dialog = OutputLocationDialog(self.root, self.general_settings)
+        dialog = OutputLocationDialog(self, self.general_settings)
         self.root.wait_window(dialog)
         
         if dialog.result:
@@ -2362,7 +2464,7 @@ class OCRApp:
                                    parent=self.root)
                 return
             
-        progress_dialog = OCRProgressDialog(self.root, len(self.file_paths), self.log_queue)
+        progress_dialog = OCRProgressDialog(self, len(self.file_paths), self.log_queue)
         
         def progress_callback(status, current_file, filename):
             """Callback to update the progress dialog from the processing thread."""
@@ -2438,45 +2540,15 @@ class OCRApp:
         threading.Thread(target=process_thread, daemon=True).start()
         
     def show_results(self, results, output_paths):
-        """Show processing results."""
+        """Show processing results using the new ResultsDialog."""
         if results:
+            # Create the results dialog
+            dialog = ResultsDialog(self, results, output_paths, self.log_queue, self.general_settings)
+            self.root.wait_window(dialog)
+            
+            # Update status bar after the dialog is closed
             successful_results = [r for r in results if r["status"] == "success"]
             failed_results = [r for r in results if r["status"] == "error"]
-            
-            output_format = self.general_settings.get("output_format", "PDF")
-            
-            message = f"Processing completed!\n\n"
-            message += f"Successfully processed: {len(successful_results)} files\n"
-            if failed_results:
-                message += f"Failed to process: {len(failed_results)} files\n"
-            
-            if output_paths:
-                if output_format == "CSV":
-                    message += f"\nCSV file saved to: {output_paths[0]}"
-                elif "merged" in output_format.lower():
-                    message += f"\nMerged PDF file saved to: {output_paths[0]}"
-                else:
-                    format_type = "PDF" if output_format.startswith("PDF") else output_format
-                    message += f"\n{format_type} files saved to: {os.path.dirname(output_paths[0])}"
-                message += f"\n\nWould you like to open the output folder?"
-                
-                # Ask if user wants to open the output folder
-                if messagebox.askyesno("Processing Complete", message, parent=self.root):
-                    import subprocess
-                    import platform
-                    
-                    folder_path = os.path.dirname(output_paths[0])
-                    if platform.system() == "Darwin":  # macOS
-                        subprocess.run(["open", folder_path])
-                    elif platform.system() == "Windows":
-                        subprocess.run(["explorer", folder_path])
-                    else:  # Linux
-                        subprocess.run(["xdg-open", folder_path])
-            else:
-                format_type = "PDF" if output_format.startswith("PDF") else output_format
-                message += f"\n\nNo {format_type} files were created due to processing errors."
-                messagebox.showinfo("Processing Complete", message, parent=self.root)
-            
             self.status_var.set(f"Processing complete - {len(successful_results)} successful, {len(failed_results)} failed")
         else:
             messagebox.showwarning("No Results", "No files were processed", parent=self.root)
@@ -2573,6 +2645,25 @@ class OCRApp:
     def run(self):
         """Run the application."""
         self.root.mainloop()
+
+    def on_log_viewer_closed(self):
+        """Callback for when the log viewer is closed."""
+        self.log_viewer = None
+
+    def show_log_viewer(self):
+        """Show the log viewer dialog."""
+        if self.log_queue:
+            if self.log_viewer is None or not self.log_viewer.winfo_exists():
+                # Create a new log viewer if one isn't active
+                self.log_viewer = LogViewerDialog(self, self.log_queue, self.log_history, on_close=self.on_log_viewer_closed)
+            else:
+                try:
+                    # If the window exists, bring it to the front
+                    self.log_viewer.lift()
+                    self.log_viewer.grab_set()
+                except tk.TclError:
+                    # Failsafe: if the window was destroyed unexpectedly
+                    self.log_viewer = LogViewerDialog(self, self.log_queue, self.log_history, on_close=self.on_log_viewer_closed)
 
 
 def main():
