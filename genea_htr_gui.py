@@ -47,7 +47,7 @@ from datetime import datetime
 from genea_htr import HandwritingOCR
 
 # Application version
-VERSION = "0.3.7"
+VERSION = "0.3.8"
 
 
 class BaseDialog(tk.Toplevel):

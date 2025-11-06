@@ -384,13 +384,14 @@ Transcription:
         if self.provider_name == "openai":
             return {
                 "primary": {
-                    "model": "o4-mini",
-                    "reasoning_effort": "high",
+                    "model": "gpt-5-mini",
                     "max_completion_tokens": 8000,
+                    "temperature": 0.1,
+                    "top_p": 0.9,
                     "prompt": base_prompt
                 },
                 "fallback": {
-                    "model": "gpt-4o",
+                    "model": "gpt-4o-mini",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.9,
@@ -400,14 +401,14 @@ Transcription:
         elif self.provider_name == "anthropic":
             return {
                 "primary": {
-                    "model": "claude-3-5-sonnet-20241022",
+                    "model": "claude-sonnet-4-5",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.95,
                     "prompt": base_prompt
                 },
                 "fallback": {
-                    "model": "claude-3-5-haiku-20241022",
+                    "model": "claude-haiku-4-5",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.9,
@@ -417,14 +418,14 @@ Transcription:
         elif self.provider_name == "openrouter":
             return {
                 "primary": {
-                    "model": "google/gemini-2.5-flash-lite-preview-06-17",
+                    "model": "google/gemini-2.5-flash-preview-09-2025",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.95,
                     "prompt": base_prompt
                 },
                 "fallback": {
-                    "model": "openai/gpt-4o",
+                    "model": "openai/gpt-5-mini",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.9,
@@ -434,14 +435,14 @@ Transcription:
         elif self.provider_name == "google":
             return {
                 "primary": {
-                    "model": "gemini-2.5-flash-lite-preview-06-17",
+                    "model": "gemini-2.5-flash-preview-09-2025",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.95,
                     "prompt": base_prompt
                 },
                 "fallback": {
-                    "model": "gemini-2.0-flash-lite",
+                    "model": "gemini-2.5-flash-lite-preview-09-2025",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.9,

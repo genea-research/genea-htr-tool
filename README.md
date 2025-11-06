@@ -28,20 +28,37 @@ Licensed under **GNU General Public License v3.0 (GPLv3)**. You are free to use,
 
 | Provider | Primary Model | Fallback Model | Requirements |
 |----------|---------------|----------------|--------------|
-| **OpenAI** | o4-mini | gpt-4o | OpenAI API key, `openai` package |
-| **Claude** | claude-3-5-sonnet-20241022 | claude-3-5-haiku-20241022 | Anthropic API key, `anthropic` package |
-| **Google Gemini** | gemini-2.5-flash-lite-preview-06-17 | gemini-2.0-flash-lite | Google API key, `google-generativeai` package |
-| **OpenRouter** | google/gemini-2.5-flash-lite-preview-06-17 | openai/gpt-4o | OpenRouter API key, `requests` package |
+| **OpenRouter** | google/gemini-2.5-flash-preview-09-2025 | openai/gpt-5-mini | OpenRouter API key, `requests` package |
+| **Google Gemini** | gemini-2.5-flash-preview-09-2025 | gemini-2.5-flash-lite-preview-09-2025 | Google API key, `google-generativeai` package |
+| **OpenAI** | gpt-5-mini | gpt-4o-mini | OpenAI API key, `openai` package |
+| **Claude** | claude-sonnet-4-5 | claude-haiku-4-5 | Anthropic API key, `anthropic` package |
+
+## Pricing Information
+
+All providers charge based on token usage (input tokens for images sent, output tokens for transcriptions received). Costs can vary significantly between providers.
+
+### Token Costs by Provider
+
+| Provider | Model Type | Model Name | Input Cost | Output Cost |
+|----------|-----------|------------|------------|-------------|
+| **OpenRouter** | Primary | google/gemini-2.5-flash-preview-09-2025 | $0.30/M tokens | $2.50/M tokens |
+| | Fallback | openai/gpt-5-mini | $0.25/M tokens | $2.00/M tokens |
+| **Google Gemini** | Primary | gemini-2.5-flash-preview-09-2025 | $0.30/M tokens | $2.50/M tokens |
+| | Fallback | gemini-2.5-flash-lite-preview-09-2025 | $0.10/M tokens | $0.40/M tokens |
+| **OpenAI** | Primary | gpt-5-mini | $0.25/M tokens | $2.00/M tokens |
+| | Fallback | gpt-4o-mini | $0.15/M tokens | $0.60/M tokens |
+| **Claude** | Primary | claude-sonnet-4-5 | $3.00/M tokens | $15.00/M tokens |
+| | Fallback | claude-haiku-4-5 | $1.00/M tokens | $5.00/M tokens |
 
 ## Installation
 
 ### Prerequisites
 - Python 3.7 or higher
 - API key for your chosen provider:
-  - **OpenAI**: Get from [OpenAI's website](https://platform.openai.com/api-keys)
-  - **Anthropic**: Get from [Anthropic Console](https://console.anthropic.com/)
   - **OpenRouter**: Get from [OpenRouter](https://openrouter.ai/keys)
   - **Google Gemini**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+  - **OpenAI**: Get from [OpenAI's website](https://platform.openai.com/api-keys)
+  - **Anthropic**: Get from [Anthropic Console](https://console.anthropic.com/)
 
 ### Dependencies
 
@@ -68,10 +85,10 @@ Licensed under **GNU General Public License v3.0 (GPLv3)**. You are free to use,
 2. **Set API key** (choose one method):
    ```bash
    # Environment variable (recommended)
+   export OPENROUTER_API_KEY="your-key-here"
+   export GOOGLE_API_KEY="your-key-here"
    export OPENAI_API_KEY="your-key-here"
    export ANTHROPIC_API_KEY="your-key-here"
-   export GOOGLE_API_KEY="your-key-here"
-   export OPENROUTER_API_KEY="your-key-here"
    
    # Or use --api-key argument when running
    ```
@@ -95,7 +112,7 @@ This will open the GUI application that allows you to drag and drop your image f
 ### GUI Features
 
 - **Drag & Drop Interface**: Simply drag image files (JPEG, PNG) and PDF documents directly into the application window
-- **Provider Selection**: Choose from OpenRouter, Anthropic, Google, or OpenAI
+- **Provider Selection**: Choose from OpenRouter, Google, OpenAI, or Anthropic
 - **Output Format Options**: 
   - **PDF with images**: Individual searchable PDFs with source images (default)
   - **PDF with images (merged)**: Single merged PDF with all transcriptions and source images
@@ -118,9 +135,9 @@ To process all supported files (JPEG, PNG, PDF) in a specific folder, provide th
 python genea_htr.py /path/to/documents
 
 # Use different providers
-python genea_htr.py /path/to/documents --provider anthropic
 python genea_htr.py /path/to/documents --provider google
 python genea_htr.py /path/to/documents --provider openai
+python genea_htr.py /path/to/documents --provider anthropic
 ```
 
 **Advanced options:**
@@ -139,7 +156,7 @@ python genea_htr.py /path/to/images --output-format pdf --no-images  # text-only
 | Option | Description | Example |
 |--------|-------------|---------|
 | `input_dir` | Directory containing files to process (**required**) | `./documents` |
-| `--provider` | AI provider: `openai`, `anthropic`, `google`, `openrouter` (default) | `--provider google` |
+| `--provider` | AI provider: `openrouter` (default), `google`, `openai`, `anthropic` | `--provider google` |
 | `--api-key` | API key (optional if env variable set) | `--api-key "your-key"` |
 | `--output-format` | `pdf` (default), `txt`, `csv`, `merged-pdf` | `--output-format txt` |
 | `--no-images` | Create text-only PDFs | `--no-images` |
@@ -204,20 +221,21 @@ your-documents/
 
 ## Cost Considerations
 
-- This tool uses paid AI API services. The cost depends on the provider, model used, and complexity of the images.
-- All providers use a maximum of 8000 tokens per image by default.
-- Process a small batch of images first to estimate the cost.
+- This tool uses paid AI API services. See the [Pricing Information](#pricing-information) section above for detailed cost breakdowns by provider.
+- The cost depends on the provider, model used, image complexity, and document length.
+- All providers use a maximum of 8,000 output tokens per image by default to control costs.
+- **Important:** Always process a small test batch (5-10 images) first to estimate costs for your specific documents before processing large collections.
 - Regularly check your API usage on your provider's dashboard:
+  - OpenRouter: [Usage Page](https://openrouter.ai/activity)
+  - Google Gemini: [Google AI Studio](https://makersuite.google.com/)
   - OpenAI: [Usage Dashboard](https://platform.openai.com/usage)
   - Claude: [Anthropic Console](https://console.anthropic.com/)
-  - Google Gemini: [Google AI Studio](https://makersuite.google.com/)
-  - OpenRouter: [Usage Page](https://openrouter.ai/activity)
 
 ## Troubleshooting
 
 **Common Issues:**
 - **"API key is required"**: Set environment variable or use `--api-key`
-- **"Unsupported provider"**: Use `openai`, `anthropic`, `google`, or `openrouter`
+- **"Unsupported provider"**: Use `openrouter`, `google`, `openai`, or `anthropic`
 - **Import errors**: Install required provider package (see Installation)
 - **"No supported files found"**: Check directory path and file extensions
 - **"PyMuPDF is required"**: Install with `pip install PyMuPDF`
