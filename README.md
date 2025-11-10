@@ -28,7 +28,7 @@ Licensed under **GNU General Public License v3.0 (GPLv3)**. You are free to use,
 
 | Provider | Primary Model | Fallback Model | Requirements |
 |----------|---------------|----------------|--------------|
-| **OpenRouter** | google/gemini-2.5-flash-preview-09-2025 | openai/gpt-5-mini | OpenRouter API key, `requests` package |
+| **OpenRouter** | qwen/qwen3-vl-235b-a22b-instruct | openai/gpt-5-mini | OpenRouter API key, `requests` package |
 | **Google Gemini** | gemini-2.5-flash-preview-09-2025 | gemini-2.5-flash-lite-preview-09-2025 | Google API key, `google-generativeai` package |
 | **OpenAI** | gpt-5-mini | gpt-4o-mini | OpenAI API key, `openai` package |
 | **Claude** | claude-sonnet-4-5 | claude-haiku-4-5 | Anthropic API key, `anthropic` package |
@@ -41,7 +41,7 @@ All providers charge based on token usage (input tokens for images sent, output 
 
 | Provider | Model Type | Model Name | Input Cost | Output Cost |
 |----------|-----------|------------|------------|-------------|
-| **OpenRouter** | Primary | google/gemini-2.5-flash-preview-09-2025 | $0.30/M tokens | $2.50/M tokens |
+| **OpenRouter** | Primary | qwen/qwen3-vl-235b-a22b-instruct | $0.22/M tokens | $0.88/M tokens |
 | | Fallback | openai/gpt-5-mini | $0.25/M tokens | $2.00/M tokens |
 | **Google Gemini** | Primary | gemini-2.5-flash-preview-09-2025 | $0.30/M tokens | $2.50/M tokens |
 | | Fallback | gemini-2.5-flash-lite-preview-09-2025 | $0.10/M tokens | $0.40/M tokens |

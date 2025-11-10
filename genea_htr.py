@@ -418,7 +418,7 @@ Transcription:
         elif self.provider_name == "openrouter":
             return {
                 "primary": {
-                    "model": "google/gemini-2.5-flash-preview-09-2025",
+                    "model": "qwen/qwen3-vl-235b-a22b-instruct",
                     "max_tokens": 8000,
                     "temperature": 0.1,
                     "top_p": 0.95,
